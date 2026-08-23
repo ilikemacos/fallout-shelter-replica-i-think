@@ -65,6 +65,10 @@ def main():
         "--distpath", str(DIST),
         "--workpath", str(ROOT / "build"),
         "--specpath", str(ROOT / "build"),
+        "--hidden-import", "OpenGL.platform.egl",
+        "--hidden-import", "OpenGL.platform.glx",
+        "--hidden-import", "OpenGL.platform.darwin",
+        "--collect-submodules", "OpenGL",
         str(ROOT / "run.py"),
     ]
     if icns:

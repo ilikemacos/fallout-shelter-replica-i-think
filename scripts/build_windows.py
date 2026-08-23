@@ -61,6 +61,8 @@ def main():
         "--distpath", str(DIST),
         "--workpath", str(ROOT / "build"),
         "--specpath", str(ROOT / "build"),
+        "--hidden-import", "OpenGL.platform.win32",
+        "--collect-submodules", "OpenGL",
         str(ROOT / "run.py"),
     ]
     if icon:

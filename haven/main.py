@@ -1,53 +1,76 @@
-"""Main entry point, main loop, and screens for Haven."""
+"""Entry point, main loop, and screens for Haven."""
 
 from __future__ import annotations
+
 import math
-import os
 import sys
 import time as _time
+
 import pygame
 
-from . import config as C
-from . import data as D
 from . import assets as G
 from . import audio as A
+from . import config as C
+from . import data as D
+from . import game as GM
+from . import render as R
 from . import save as S
 from . import ui as U
-from . import game as GM
+
+# HUD metrics, in design units (see ui.s()).
+HUD_TOP = 96
+HUD_BOT = 54
+PANEL_W = 430
 
 
-# --------------------- Camera ---------------------
+def res_index(name: str) -> int:
+    for i, (n, _, _) in enumerate(C.RESOLUTIONS):
+        if n == name:
+            return i
+    return 2
+
+
+# ======================================================================
+# Camera
+# ======================================================================
 class Camera:
-    def __init__(self, screen_w, screen_h):
+    def __init__(self, w, h):
         self.x = C.COLUMNS * C.CELL_W / 2
-        self.y = 3 * C.CELL_H
-        self.zoom = 1.0
-        self.screen_w = screen_w
-        self.screen_h = screen_h
-        self.viewport = pygame.Rect(0, 96, screen_w, screen_h - 96 - 44)
-        self._dragging = False
-        self._drag_last = None
-        self._pinch = False
-        self._smooth_tx = self.x
-        self._smooth_ty = self.y
+        self.y = 2.5 * C.CELL_H
+        self.zoom = 0.78
+        self.viewport = pygame.Rect(0, 0, w, h)
+        self.resize(w, h)
+        self._drag = False
+        self._last = None
 
     def resize(self, w, h):
-        self.screen_w = w
-        self.screen_h = h
-        self.viewport = pygame.Rect(0, 96, w, h - 96 - 44)
+        top = U.s(HUD_TOP)
+        bot = U.s(HUD_BOT)
+        self.viewport = pygame.Rect(0, top, w, max(80, h - top - bot))
 
-    def world_to_screen(self, wx, wy) -> tuple[float, float]:
-        cx = self.viewport.x + self.viewport.w / 2
-        cy = self.viewport.y + self.viewport.h / 2
-        return (cx + (wx - self.x) * self.zoom, cy + (wy - self.y) * self.zoom)
+    # -- zoom is quantised so cached scaled sprites are reused between frames
+    @property
+    def qzoom(self) -> float:
+        return round(self.zoom * 20) / 20.0
 
-    def screen_to_world(self, sx, sy) -> tuple[float, float]:
-        cx = self.viewport.x + self.viewport.w / 2
-        cy = self.viewport.y + self.viewport.h / 2
-        return ((sx - cx) / self.zoom + self.x, (sy - cy) / self.zoom + self.y)
+    def world_to_screen(self, wx, wy):
+        z = self.qzoom
+        cx = self.viewport.centerx
+        cy = self.viewport.centery
+        return (cx + (wx - self.x) * z, cy + (wy - self.y) * z)
+
+    def screen_to_world(self, sx, sy):
+        z = self.qzoom
+        cx = self.viewport.centerx
+        cy = self.viewport.centery
+        return ((sx - cx) / z + self.x, (sy - cy) / z + self.y)
+
+    def clamp(self):
+        self.x = max(-C.CELL_W * 2, min(C.COLUMNS * C.CELL_W + C.CELL_W * 2, self.x))
+        self.y = max(-C.CELL_H * 2, min(C.FLOOR_COUNT * C.CELL_H + C.CELL_H * 2, self.y))
 
     def update(self, dt, keys):
-        pan = 480 * dt / max(0.5, self.zoom)
+        pan = 900 * dt / max(0.35, self.zoom)
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             self.x -= pan
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
@@ -56,1197 +79,1962 @@ class Camera:
             self.y -= pan
         if keys[pygame.K_DOWN] or keys[pygame.K_s]:
             self.y += pan
-        # smooth follow
-        self._smooth_tx += (self.x - self._smooth_tx) * min(1, dt * 12)
-        self._smooth_ty += (self.y - self._smooth_ty) * min(1, dt * 12)
+        self.clamp()
+
+    def focus(self, floor, x):
+        self.x = x * C.CELL_W
+        self.y = floor * C.CELL_H + C.CELL_H / 2
+        self.clamp()
 
     def handle(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 2:
-            self._dragging = True
-            self._drag_last = event.pos
-        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
-            self._dragging = True
-            self._drag_last = event.pos
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button in (2, 3):
+            self._drag = True
+            self._last = event.pos
         elif event.type == pygame.MOUSEBUTTONUP and event.button in (2, 3):
-            self._dragging = False
-            self._drag_last = None
-        elif event.type == pygame.MOUSEMOTION and self._dragging and self._drag_last:
-            dx = event.pos[0] - self._drag_last[0]
-            dy = event.pos[1] - self._drag_last[1]
-            self.x -= dx / self.zoom
-            self.y -= dy / self.zoom
-            self._drag_last = event.pos
+            self._drag = False
+            self._last = None
+        elif event.type == pygame.MOUSEMOTION and self._drag and self._last:
+            z = self.qzoom
+            self.x -= (event.pos[0] - self._last[0]) / z
+            self.y -= (event.pos[1] - self._last[1]) / z
+            self._last = event.pos
+            self.clamp()
         elif event.type == pygame.MOUSEWHEEL:
-            old = self.zoom
-            self.zoom = max(0.5, min(2.0, self.zoom * (1.1 if event.y > 0 else 1 / 1.1)))
-            # zoom toward cursor
             mx, my = pygame.mouse.get_pos()
-            wx, wy = self.screen_to_world(mx, my)
-            self.x = wx - (mx - (self.viewport.x + self.viewport.w / 2)) / self.zoom
-            self.y = wy - (my - (self.viewport.y + self.viewport.h / 2)) / self.zoom
+            before = self.screen_to_world(mx, my)
+            self.zoom = max(0.25, min(1.6, self.zoom * (1.12 if event.y > 0 else 1 / 1.12)))
+            after = self.screen_to_world(mx, my)
+            self.x += before[0] - after[0]
+            self.y += before[1] - after[1]
+            self.clamp()
 
 
-# --------------------- Screens ---------------------
+# ======================================================================
+# Scaled-sprite cache
+# ======================================================================
+_scaled: dict = {}
+
+
+def scaled(surf: pygame.Surface, w: int, h: int, key) -> pygame.Surface:
+    w, h = max(1, int(w)), max(1, int(h))
+    ck = (key, w, h)
+    got = _scaled.get(ck)
+    if got is None:
+        if len(_scaled) > 2200:
+            _scaled.clear()
+        got = pygame.transform.smoothscale(surf, (w, h))
+        _scaled[ck] = got
+    return got
+
+
+# ======================================================================
+# Main menu
+# ======================================================================
 class MainMenuScreen:
     def __init__(self, app):
         self.app = app
-        cx = app.screen.get_width() // 2
-        cy = app.screen.get_height() // 2
+        self.t = 0.0
+        self._layout()
+
+    def _layout(self):
+        w, h = self.app.size
+        bw, bh = U.s(300), U.s(48)
+        cx = w // 2 - bw // 2
+        y = int(h * 0.52)
+        gap = U.s(58)
+        has_save = any(s["exists"] for s in S.list_slots())
         self.buttons = [
-            U.Button((cx - 130, cy - 20, 260, 44), "Continue", self.act_continue, style="primary"),
-            U.Button((cx - 130, cy + 34, 260, 40), "New Game", self.act_new),
-            U.Button((cx - 130, cy + 78, 260, 40), "Load Game", self.act_load),
-            U.Button((cx - 130, cy + 122, 260, 40), "Settings", self.act_settings),
-            U.Button((cx - 130, cy + 166, 260, 40), "Quit", self.act_quit),
+            U.Button((cx, y, bw, bh), "Continue", self._continue,
+                     style="primary", enabled=has_save, size=18),
+            U.Button((cx, y + gap, bw, bh), "New Game",
+                     lambda: self.app.set_screen(SlotSelectScreen(self.app, "new")), size=18),
+            U.Button((cx, y + gap * 2, bw, bh), "Load Game",
+                     lambda: self.app.set_screen(SlotSelectScreen(self.app, "load")), size=18),
+            U.Button((cx, y + gap * 3, bw, bh), "Settings",
+                     lambda: self.app.set_screen(
+                         SettingsScreen(self.app, lambda: self.app.set_screen(MainMenuScreen(self.app)))),
+                     size=18),
+            U.Button((cx, y + gap * 4, bw, bh), "Quit",
+                     lambda: setattr(self.app, "running", False), size=18),
         ]
-        # disable continue if no saves
-        slots = S.list_slots()
-        if not any(s["exists"] for s in slots):
-            self.buttons[0].enabled = False
 
-    def act_continue(self):
-        slots = S.list_slots()
-        latest = None
-        for s in slots:
-            if s["exists"]:
-                if latest is None or s["meta"].get("saved_at", 0) > latest["meta"].get("saved_at", 0):
-                    latest = s
-        if latest:
-            d = S.load(latest["slot"])
+    def resize(self):
+        self._layout()
+
+    def update(self, dt):
+        self.t += dt
+        for b in self.buttons:
+            b.update(dt)
+
+    def _continue(self):
+        best = None
+        for s in S.list_slots():
+            if s["exists"] and not s["meta"].get("broken"):
+                if best is None or s["meta"].get("saved_at", 0) > best["meta"].get("saved_at", 0):
+                    best = s
+        if best:
+            d = S.load(best["slot"])
             if d:
-                self.app.game = GM.GameState.from_dict(d)
-                self.app.slot = latest["slot"]
-                self.app.set_screen(WorldScreen(self.app))
-
-    def act_new(self):
-        self.app.set_screen(SlotSelectScreen(self.app, mode="new"))
-
-    def act_load(self):
-        self.app.set_screen(SlotSelectScreen(self.app, mode="load"))
-
-    def act_settings(self):
-        self.app.set_screen(SettingsScreen(self.app, back=lambda: self.app.set_screen(MainMenuScreen(self.app))))
-
-    def act_quit(self):
-        self.app.running = False
+                self.app.start_game(GM.GameState.from_dict(d), best["slot"])
 
     def draw(self, s):
         w, h = s.get_size()
-        # gradient background
-        for y in range(h):
+        for y in range(0, h, 2):
             t = y / h
-            c = (int(20 + 20 * t), int(22 + 20 * t), int(44 + 18 * t))
-            pygame.draw.line(s, c, (0, y), (w, y))
-        # logo
-        icon = G.app_icon(160)
-        s.blit(icon, (w // 2 - 80, h // 3 - 180))
-        U.text(s, "HAVEN", (w // 2, h // 3 + 10), C.UI_ACCENT, size=64, bold=True, center=True)
+            c = (int(16 + 26 * t), int(20 + 24 * t), int(38 + 34 * t))
+            pygame.draw.rect(s, c, (0, y, w, 2))
+        # drifting dust motes
+        for i in range(70):
+            px = (i * 137 + self.t * (12 + i % 7) * 3) % w
+            py = (i * 83 + self.t * 9) % h
+            a = 40 + (i % 5) * 22
+            pygame.draw.circle(s, (a + 60, a + 50, a + 40), (int(px), int(py)), U.s(1) + (i % 2))
+
+        icon = G.app_icon(U.s(150))
+        s.blit(icon, (w // 2 - icon.get_width() // 2, int(h * 0.13)))
+        U.text(s, "HAVEN", (w // 2, int(h * 0.38)), C.UI_ACCENT,
+               size=76, bold=True, center=True, shadow=True)
         U.text(s, "an underground shelter management game",
-               (w // 2, h // 3 + 50), C.UI_TEXT_DIM, size=16, center=True)
-        for b in self.buttons: b.draw(s)
-        U.text(s, "v1.0.0", (10, h - 22), C.UI_TEXT_DIM, size=12)
-        U.text(s, "Original project — not affiliated with any other franchise.",
-               (w - 10, h - 22), C.UI_TEXT_DIM, size=12, right=True)
-
-    def handle(self, event):
+               (w // 2, int(h * 0.44)), C.UI_TEXT_DIM, size=17, center=True)
         for b in self.buttons:
-            b.handle(event)
+            b.draw(s)
+        U.text(s, f"v1.0.0  ·  {self.app.renderer.name} · {self.app.res_name}",
+               (U.s(12), h - U.s(24)), C.UI_TEXT_DIM, size=13)
+        U.text(s, "Original work — not affiliated with any other game or franchise.",
+               (w - U.s(12), h - U.s(24)), C.UI_TEXT_DIM, size=13, right=True)
+
+    def handle(self, e):
+        for b in self.buttons:
+            b.handle(e)
 
 
+# ======================================================================
+# Slot select
+# ======================================================================
 class SlotSelectScreen:
     def __init__(self, app, mode="new"):
         self.app = app
         self.mode = mode
+        self.confirm = None
         self.refresh()
 
     def refresh(self):
         self.slots = S.list_slots()
 
+    def resize(self):
+        pass
+
+    def update(self, dt):
+        pass
+
     def draw(self, s):
         w, h = s.get_size()
-        s.fill((22, 24, 34))
-        title = "New Game — Choose a slot" if self.mode == "new" else "Load Game"
-        U.text(s, title, (w // 2, 60), C.UI_ACCENT, size=32, bold=True, center=True)
-        y = 120
-        self._rects = []
+        s.fill((20, 22, 32))
+        U.text(s, "Choose a Slot" if self.mode == "new" else "Load Game",
+               (w // 2, U.s(56)), C.UI_ACCENT, size=38, bold=True, center=True)
+        self._rows = []
+        cw, ch = U.s(520), U.s(104)
+        x = w // 2 - cw // 2
+        y = U.s(130)
         for slot in self.slots:
-            r = pygame.Rect(w // 2 - 240, y, 480, 90)
-            pygame.draw.rect(s, C.UI_BG2, r, border_radius=6)
-            pygame.draw.rect(s, C.UI_BORDER, r, 1, border_radius=6)
+            r = pygame.Rect(x, y, cw, ch)
+            hov = r.collidepoint(pygame.mouse.get_pos())
+            pygame.draw.rect(s, C.UI_BG2 if hov else C.UI_BG, r, border_radius=U.s(6))
+            pygame.draw.rect(s, C.UI_ACCENT if hov else C.UI_BORDER, r,
+                             max(1, U.s(1)), border_radius=U.s(6))
+            del_r = None
             if slot["exists"]:
                 m = slot["meta"]
-                U.text(s, f"Slot {slot['slot']+1}", (r.x + 12, r.y + 10),
-                       C.UI_ACCENT, size=20, bold=True)
-                U.text(s, f"Pop {m.get('pop','?')} · Caps {m.get('caps','?')} · "
-                          f"{int(m.get('time',0)//60)} min played",
-                       (r.x + 12, r.y + 38), C.UI_TEXT, size=14)
-                U.text(s, _time.strftime("%Y-%m-%d %H:%M", _time.localtime(m.get("saved_at", 0))),
-                       (r.x + 12, r.y + 60), C.UI_TEXT_DIM, size=13)
-                # actions
-                del_rect = pygame.Rect(r.right - 80, r.y + 30, 60, 30)
-                pygame.draw.rect(s, (110, 42, 42), del_rect, border_radius=4)
-                U.text(s, "Delete", del_rect.center, C.UI_TEXT, size=13, center=True)
-                self._rects.append((slot["slot"], r, del_rect))
+                if m.get("broken"):
+                    U.text(s, f"Slot {slot['slot']+1} — damaged save",
+                           (r.x + U.s(14), r.y + U.s(16)), C.UI_BAD, size=20, bold=True)
+                    U.text(s, "A backup will be tried on load.",
+                           (r.x + U.s(14), r.y + U.s(46)), C.UI_TEXT_DIM, size=14)
+                else:
+                    U.text(s, f"Haven {m.get('vault', '—')}",
+                           (r.x + U.s(14), r.y + U.s(12)), C.UI_ACCENT, size=22, bold=True)
+                    U.text(s, f"{m.get('pop','?')} residents · {m.get('caps','?')} caps · "
+                              f"{int(m.get('time',0)//60)} min played",
+                           (r.x + U.s(14), r.y + U.s(44)), C.UI_TEXT, size=15)
+                    U.text(s, _time.strftime("%Y-%m-%d %H:%M",
+                                             _time.localtime(m.get("saved_at", 0))),
+                           (r.x + U.s(14), r.y + U.s(70)), C.UI_TEXT_DIM, size=13)
+                del_r = pygame.Rect(r.right - U.s(96), r.centery - U.s(17), U.s(80), U.s(34))
+                pygame.draw.rect(s, (118, 44, 44), del_r, border_radius=U.s(4))
+                U.text(s, "Delete", del_r.center, C.UI_TEXT, size=14, center=True)
             else:
-                U.text(s, f"Slot {slot['slot']+1} — empty", (r.x + 12, r.y + 30),
-                       C.UI_TEXT_DIM, size=18)
-                self._rects.append((slot["slot"], r, None))
-            y += 100
-        # Back button
-        self.back_rect = pygame.Rect(20, h - 60, 100, 36)
-        pygame.draw.rect(s, C.UI_BG2, self.back_rect, border_radius=4)
-        pygame.draw.rect(s, C.UI_BORDER, self.back_rect, 1, border_radius=4)
-        U.text(s, "Back", self.back_rect.center, C.UI_TEXT, size=15, center=True)
+                U.text(s, f"Slot {slot['slot']+1}", (r.x + U.s(14), r.y + U.s(20)),
+                       C.UI_TEXT_DIM, size=20, bold=True)
+                U.text(s, "Empty", (r.x + U.s(14), r.y + U.s(52)), C.UI_TEXT_DIM, size=15)
+            self._rows.append((slot, r, del_r))
+            y += ch + U.s(16)
 
-    def handle(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self.back_rect.collidepoint(event.pos):
-                self.app.set_screen(MainMenuScreen(self.app))
+        self.back_r = pygame.Rect(U.s(24), h - U.s(64), U.s(110), U.s(40))
+        pygame.draw.rect(s, C.UI_BG2, self.back_r, border_radius=U.s(4))
+        pygame.draw.rect(s, C.UI_BORDER, self.back_r, max(1, U.s(1)), border_radius=U.s(4))
+        U.text(s, "Back", self.back_r.center, C.UI_TEXT, size=16, center=True)
+
+        if self.confirm is not None:
+            veil = pygame.Surface((w, h), pygame.SRCALPHA)
+            veil.fill((0, 0, 0, 180))
+            s.blit(veil, (0, 0))
+            box = pygame.Rect(w // 2 - U.s(220), h // 2 - U.s(90), U.s(440), U.s(180))
+            U.panel(s, box, "Overwrite this slot?")
+            U.text(s, "The existing shelter will be lost.",
+                   (box.centerx, box.y + U.s(72)), C.UI_TEXT, size=16, center=True)
+            self.yes_r = pygame.Rect(box.x + U.s(40), box.bottom - U.s(58), U.s(160), U.s(40))
+            self.no_r = pygame.Rect(box.right - U.s(200), box.bottom - U.s(58), U.s(160), U.s(40))
+            pygame.draw.rect(s, (124, 44, 44), self.yes_r, border_radius=U.s(4))
+            U.text(s, "Overwrite", self.yes_r.center, C.UI_TEXT, size=16, center=True, bold=True)
+            pygame.draw.rect(s, C.UI_BG2, self.no_r, border_radius=U.s(4))
+            pygame.draw.rect(s, C.UI_BORDER, self.no_r, max(1, U.s(1)), border_radius=U.s(4))
+            U.text(s, "Cancel", self.no_r.center, C.UI_TEXT, size=16, center=True)
+
+    def handle(self, e):
+        if e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
+            self.app.set_screen(MainMenuScreen(self.app))
+            return
+        if e.type != pygame.MOUSEBUTTONDOWN or e.button != 1:
+            return
+        if self.confirm is not None:
+            if self.yes_r.collidepoint(e.pos):
+                self.app.start_game(GM.GameState(), self.confirm)
+            elif self.no_r.collidepoint(e.pos):
+                self.confirm = None
+            return
+        if self.back_r.collidepoint(e.pos):
+            self.app.set_screen(MainMenuScreen(self.app))
+            return
+        for slot, r, del_r in self._rows:
+            if del_r and del_r.collidepoint(e.pos):
+                S.delete(slot["slot"])
+                self.refresh()
                 return
-            for slot_i, r, del_rect in self._rects:
-                if del_rect and del_rect.collidepoint(event.pos):
-                    S.delete(slot_i)
-                    self.refresh()
-                    return
-                if r.collidepoint(event.pos):
-                    if self.mode == "new":
-                        # confirm overwrite if exists (implicit — we just start fresh)
-                        self.app.game = GM.GameState()
-                        self.app.slot = slot_i
-                        S.save(slot_i, self.app.game.to_dict())
-                        self.app.set_screen(WorldScreen(self.app))
+            if r.collidepoint(e.pos):
+                if self.mode == "new":
+                    if slot["exists"]:
+                        self.confirm = slot["slot"]
                     else:
-                        d = S.load(slot_i)
-                        if d:
-                            self.app.game = GM.GameState.from_dict(d)
-                            self.app.slot = slot_i
-                            self.app.set_screen(WorldScreen(self.app))
-                    return
+                        self.app.start_game(GM.GameState(), slot["slot"])
+                else:
+                    d = S.load(slot["slot"])
+                    if d:
+                        self.app.start_game(GM.GameState.from_dict(d), slot["slot"])
+                    else:
+                        self.refresh()
+                return
 
 
+# ======================================================================
+# Settings
+# ======================================================================
 class SettingsScreen:
     def __init__(self, app, back):
         self.app = app
         self.back = back
-        self.master = A.get_settings()["master"]
-        self.music = A.get_settings()["music"]
-        self.sfx = A.get_settings()["sfx"]
-        self.music_on = A.get_settings()["music_on"]
-        self.sfx_on = A.get_settings()["sfx_on"]
-        self.fullscreen = app.fullscreen
-        self.animations = app.animations
-        w, h = app.screen.get_size()
-        self.back_btn = U.Button((20, h - 60, 100, 36), "Back", self._go_back)
-        self.reset_btn = U.Button((w - 220, h - 60, 200, 36), "Reset This Slot", self._reset_slot,
-                                  style="danger")
+        self._build()
+
+    def _build(self):
+        w, h = self.app.size
+        a = A.get_settings()
+        cx = w // 2
+        lx = cx - U.s(250)
+        wx = cx + U.s(10)
+        y = U.s(120)
+        gap = U.s(46)
+        self.rows = []
+        self.widgets = []
+
+        def slider(label, val, cb):
+            nonlocal y
+            sl = U.Slider((wx, y, U.s(240), U.s(20)), val, cb)
+            self.rows.append((label, sl, y))
+            self.widgets.append(sl)
+            y += gap
+
+        def toggle(label, val, cb):
+            nonlocal y
+            tg = U.Toggle((wx, y - U.s(3), U.s(62), U.s(26)), val, cb)
+            self.rows.append((label, tg, y))
+            self.widgets.append(tg)
+            y += gap
+
+        slider("Master volume", a["master"], lambda v: A.set_master(v))
+        slider("Music volume", a["music"],
+               lambda v: A.set_music(v, A.get_settings()["music_on"]))
+        slider("Effects volume", a["sfx"],
+               lambda v: A.set_sfx(v, A.get_settings()["sfx_on"]))
+        toggle("Music", a["music_on"], lambda v: A.set_music(A.get_settings()["music"], v))
+        toggle("Sound effects", a["sfx_on"], lambda v: A.set_sfx(A.get_settings()["sfx"], v))
+        y += U.s(8)
+
+        # Resolution picker
+        self.res_y = y
+        self.res_rects = []
+        y += gap
+        # Quality picker
+        self.qual_y = y
+        self.qual_rects = []
+        y += gap
+
+        toggle("Fullscreen", self.app.fullscreen, self.app.set_fullscreen)
+        toggle("Auto-collect resources", self.app.game.auto_collect if self.app.game else False,
+               self._set_autocollect)
+        self.bottom_y = y
+
+        bw, bh = U.s(120), U.s(42)
+        self.back_btn = U.Button((U.s(24), h - U.s(66), bw, bh), "Back", self._go_back)
+        self.reset_btn = U.Button((w - U.s(240), h - U.s(66), U.s(216), bh),
+                                  "Reset This Shelter", self._reset, style="danger", size=15)
+
+    def _set_autocollect(self, v):
+        if self.app.game:
+            self.app.game.auto_collect = v
 
     def _go_back(self):
-        A.set_master(self.master)
-        A.set_music(self.music, self.music_on)
-        A.set_sfx(self.sfx, self.sfx_on)
-        self.app.animations = self.animations
         self.app.save_settings()
         self.back()
 
-    def _reset_slot(self):
+    def _reset(self):
         if self.app.slot is not None:
             S.delete(self.app.slot)
-            self.app.game = GM.GameState()
-            S.save(self.app.slot, self.app.game.to_dict())
+            self.app.start_game(GM.GameState(), self.app.slot)
+
+    def resize(self):
+        self._build()
+
+    def update(self, dt):
+        self.back_btn.update(dt)
+        self.reset_btn.update(dt)
 
     def draw(self, s):
         w, h = s.get_size()
-        s.fill((22, 24, 34))
-        U.text(s, "Settings", (w // 2, 50), C.UI_ACCENT, size=32, bold=True, center=True)
+        s.fill((20, 22, 32))
+        U.text(s, "Settings", (w // 2, U.s(54)), C.UI_ACCENT, size=38, bold=True, center=True)
         cx = w // 2
-        y = 110
-        # sliders drawn as clickable strips
-        self._hit = []
-        for label, val, key in [
-            ("Master Volume", self.master, "master"),
-            ("Music Volume", self.music, "music"),
-            ("SFX Volume", self.sfx, "sfx"),
-        ]:
-            U.text(s, label, (cx - 240, y), C.UI_TEXT, size=17)
-            r = pygame.Rect(cx - 40, y - 4, 260, 22)
-            pygame.draw.rect(s, C.UI_BG2, r, border_radius=4)
-            fill = r.copy(); fill.w = int(r.w * val)
-            pygame.draw.rect(s, C.UI_ACCENT, fill, border_radius=4)
-            pygame.draw.rect(s, C.UI_BORDER, r, 1, border_radius=4)
-            U.text(s, f"{int(val*100)}%", (r.right + 10, y), C.UI_TEXT, size=15)
-            self._hit.append((r, key))
-            y += 44
-        # toggles
-        for label, val, key in [
-            ("Music enabled", self.music_on, "music_on"),
-            ("SFX enabled", self.sfx_on, "sfx_on"),
-            ("Fullscreen", self.fullscreen, "fullscreen"),
-            ("Animations", self.animations, "animations"),
-        ]:
-            U.text(s, label, (cx - 240, y), C.UI_TEXT, size=17)
-            r = pygame.Rect(cx - 40, y - 4, 60, 24)
-            pygame.draw.rect(s, C.UI_ACCENT if val else C.UI_BG2, r, border_radius=12)
-            pygame.draw.rect(s, C.UI_BORDER, r, 1, border_radius=12)
-            knob_x = r.right - 20 if val else r.x + 4
-            pygame.draw.circle(s, C.UI_TEXT, (knob_x + 8, r.y + 12), 8)
-            U.text(s, "On" if val else "Off", (r.right + 10, y), C.UI_TEXT, size=15)
-            self._hit.append((r, key))
-            y += 44
+        lx = cx - U.s(250)
+        for label, widget, y in self.rows:
+            U.text(s, label, (lx, y), C.UI_TEXT, size=17)
+            widget.draw(s)
+            if isinstance(widget, U.Slider):
+                U.text(s, f"{int(widget.value * 100)}%",
+                       (widget.rect.right + U.s(12), y), C.UI_TEXT_DIM, size=15)
+            else:
+                U.text(s, "On" if widget.value else "Off",
+                       (widget.rect.right + U.s(12), y), C.UI_TEXT_DIM, size=15)
 
-        U.text(s, "Controls: WASD/arrows to pan · scroll wheel to zoom · right-click drag to pan",
-               (cx, h - 120), C.UI_TEXT_DIM, size=14, center=True)
+        # Resolution row
+        U.text(s, "Resolution", (lx, self.res_y), C.UI_TEXT, size=17)
+        self.res_rects = []
+        x = cx + U.s(10)
+        for name, rw, rh in C.RESOLUTIONS:
+            bw = U.s(86)
+            r = pygame.Rect(x, self.res_y - U.s(5), bw, U.s(28))
+            on = name == self.app.res_name
+            pygame.draw.rect(s, C.UI_ACCENT if on else C.UI_BG2, r, border_radius=U.s(4))
+            pygame.draw.rect(s, C.UI_BORDER, r, max(1, U.s(1)), border_radius=U.s(4))
+            U.text(s, name, r.center, (28, 20, 6) if on else C.UI_TEXT,
+                   size=13, center=True, bold=on)
+            self.res_rects.append((r, name))
+            x += bw + U.s(6)
+
+        # Quality row
+        U.text(s, "Graphics quality", (lx, self.qual_y), C.UI_TEXT, size=17)
+        self.qual_rects = []
+        x = cx + U.s(10)
+        for q in C.QUALITY_LEVELS:
+            bw = U.s(86)
+            r = pygame.Rect(x, self.qual_y - U.s(5), bw, U.s(28))
+            on = q == self.app.quality
+            pygame.draw.rect(s, C.UI_ACCENT if on else C.UI_BG2, r, border_radius=U.s(4))
+            pygame.draw.rect(s, C.UI_BORDER, r, max(1, U.s(1)), border_radius=U.s(4))
+            U.text(s, q.title(), r.center, (28, 20, 6) if on else C.UI_TEXT,
+                   size=13, center=True, bold=on)
+            self.qual_rects.append((r, q))
+            x += bw + U.s(6)
+
+        y = self.bottom_y + U.s(14)
+        U.text(s, f"Renderer: {self.app.renderer.name} — {self.app.renderer.gl_info}",
+               (lx, y), C.UI_TEXT_DIM, size=14)
+        if self.app.renderer_note:
+            U.text(s, f"OpenGL unavailable: {self.app.renderer_note}",
+                   (lx, y + U.s(20)), C.UI_WARN, size=13)
+        U.text(s, "Camera: WASD/arrows pan · wheel zooms · right-drag pans",
+               (lx, y + U.s(44)), C.UI_TEXT_DIM, size=14)
+        U.text(s, "Drag a resident onto a room to put them to work.",
+               (lx, y + U.s(64)), C.UI_TEXT_DIM, size=14)
+        U.text(s, f"Saves: {S.user_data_dir()}", (lx, y + U.s(88)), C.UI_TEXT_DIM, size=13)
+
         self.back_btn.draw(s)
         if self.app.slot is not None:
             self.reset_btn.draw(s)
 
-    def handle(self, event):
-        self.back_btn.handle(event)
+    def handle(self, e):
+        if e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
+            self._go_back()
+            return
+        for wdg in self.widgets:
+            if wdg.handle(e):
+                return
+        self.back_btn.handle(e)
         if self.app.slot is not None:
-            self.reset_btn.handle(event)
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            for r, key in self._hit:
-                if r.collidepoint(event.pos):
-                    if key in ("master", "music", "sfx"):
-                        val = max(0, min(1, (event.pos[0] - r.x) / r.w))
-                        setattr(self, key, val)
-                        if key == "master": A.set_master(val)
-                        elif key == "music": A.set_music(val, self.music_on)
-                        elif key == "sfx": A.set_sfx(val, self.sfx_on)
-                    elif key in ("music_on", "sfx_on"):
-                        setattr(self, key, not getattr(self, key))
-                        A.set_music(self.music, self.music_on)
-                        A.set_sfx(self.sfx, self.sfx_on)
-                    elif key == "fullscreen":
-                        self.fullscreen = not self.fullscreen
-                        self.app.set_fullscreen(self.fullscreen)
-                    elif key == "animations":
-                        self.animations = not self.animations
-        elif event.type == pygame.MOUSEMOTION and event.buttons[0]:
-            for r, key in self._hit:
-                if key in ("master", "music", "sfx") and r.collidepoint(event.pos):
-                    val = max(0, min(1, (event.pos[0] - r.x) / r.w))
-                    setattr(self, key, val)
-                    if key == "master": A.set_master(val)
-                    elif key == "music": A.set_music(val, self.music_on)
-                    elif key == "sfx": A.set_sfx(val, self.sfx_on)
+            self.reset_btn.handle(e)
+        if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+            for r, name in self.res_rects:
+                if r.collidepoint(e.pos):
+                    self.app.set_resolution(name)
+                    return
+            for r, q in self.qual_rects:
+                if r.collidepoint(e.pos):
+                    self.app.set_quality(q)
+                    return
 
 
-# --------------------- World screen ---------------------
+# ======================================================================
+# World
+# ======================================================================
 class WorldScreen:
     def __init__(self, app):
         self.app = app
-        w, h = app.screen.get_size()
-        self.cam = Camera(w, h)
-        self.tick_accum = 0.0
-        self.autosave_at = 60.0
-        self.selected_room: int | None = None
-        self.selected_resident: int | None = None
-        self.mode = "look"           # look | build | destroy
-        self.build_key: str | None = None
-        self.build_width: int = 2
-        self.build_floor: int = 0
-        self.build_x: int = 0
-        self.panel: str | None = None    # None | 'residents' | 'inventory' | 'objectives' | 'exploration' | 'menu'
-        self._make_hud()
-        self.list_scroll = U.ScrollList((0, 0, 400, 400))
-        self._notify_display: list = []
+        self.cam = Camera(*app.size)
+        self.selected_room = None
+        self.selected_resident = None
+        self.mode = "look"
+        self.build_key = None
+        self.build_width = 2
+        self.panel = None
+        self.autosave_in = 45.0
+        self.scroll = U.ScrollList()
+        self.inv_tab = 0
+        self.tooltip = None
+        self._drag_res = None
+        self._drag_from = None
+        self._drag_moved = False
+        self._collect_badges = []
+        self._build()
 
-    def _make_hud(self):
-        w, h = self.app.screen.get_size()
-        self.buttons_top = []
-        self.buttons_bottom = [
-            U.Button((10, h - 40, 110, 32), "Build", lambda: self._toggle_mode("build"), style="primary"),
-            U.Button((124, h - 40, 100, 32), "Destroy", lambda: self._toggle_mode("destroy"), style="danger"),
-            U.Button((228, h - 40, 110, 32), "Residents", lambda: self._toggle_panel("residents")),
-            U.Button((342, h - 40, 110, 32), "Inventory", lambda: self._toggle_panel("inventory")),
-            U.Button((456, h - 40, 110, 32), "Explore", lambda: self._toggle_panel("exploration")),
-            U.Button((570, h - 40, 110, 32), "Objectives", lambda: self._toggle_panel("objectives")),
-            U.Button((684, h - 40, 100, 32), "Save", self._save),
-            U.Button((788, h - 40, 100, 32), "Menu", lambda: self._toggle_panel("menu")),
+    # ---------- layout ----------
+    def _build(self):
+        w, h = self.app.size
+        by = h - U.s(HUD_BOT) + U.s(7)
+        bh = U.s(40)
+        x = U.s(10)
+
+        def mk(label, cb, wdt, style="normal", tip=None):
+            nonlocal x
+            b = U.Button((x, by, U.s(wdt), bh), label, cb, style=style,
+                         size=15, tooltip_lines=tip)
+            x += U.s(wdt) + U.s(6)
+            return b
+
+        self.bottom = [
+            mk("Build", lambda: self._mode("build"), 92, "primary",
+               ["Build (B)", "Place new rooms on the grid."]),
+            mk("Demolish", lambda: self._mode("destroy"), 100, "danger",
+               ["Demolish", "Remove a room and refund a quarter of its cost."]),
+            mk("Collect All", self._collect_all, 112, "good",
+               ["Collect All (C)", "Bank every room's finished output."]),
+            mk("Residents", lambda: self._toggle("residents"), 108, "normal",
+               ["Residents (R)"]),
+            mk("Inventory", lambda: self._toggle("inventory"), 104, "normal",
+               ["Inventory (I)"]),
+            mk("Explore", lambda: self._toggle("exploration"), 96, "normal",
+               ["Expeditions (E)"]),
+            mk("Objectives", lambda: self._toggle("objectives"), 108, "normal",
+               ["Objectives (O)"]),
+            mk("Menu", lambda: self._toggle("menu"), 84, "normal", ["Menu (Esc)"]),
         ]
-        # speed and pause
-        self.buttons_speed = [
-            U.Button((w - 210, h - 40, 60, 32), "Pause",
-                     lambda: self._set_speed(0), style="ghost"),
-            U.Button((w - 148, h - 40, 40, 32), "1x", lambda: self._set_speed(1)),
-            U.Button((w - 106, h - 40, 40, 32), "2x", lambda: self._set_speed(2)),
-            U.Button((w - 64, h - 40, 44, 32), "4x", lambda: self._set_speed(4)),
+        sx = w - U.s(232)
+        self.speed_btns = [
+            U.Button((sx, by, U.s(64), bh), "Pause", lambda: self._speed(0), size=14),
+            U.Button((sx + U.s(68), by, U.s(46), bh), "1x", lambda: self._speed(1), size=14),
+            U.Button((sx + U.s(118), by, U.s(46), bh), "2x", lambda: self._speed(2), size=14),
+            U.Button((sx + U.s(168), by, U.s(50), bh), "4x", lambda: self._speed(4), size=14),
         ]
 
-    def _set_speed(self, sp):
-        g = self.app.game
-        if sp == 0:
-            g.paused = True
-        else:
-            g.paused = False
-            g.speed = sp
-        A.play("click")
+    def resize(self):
+        self.cam.resize(*self.app.size)
+        self._build()
 
-    def _toggle_mode(self, m):
+    @property
+    def g(self) -> GM.GameState:
+        return self.app.game
+
+    # ---------- actions ----------
+    def _mode(self, m):
         if self.mode == m:
-            self.mode = "look"; self.build_key = None
+            self.mode = "look"
+            self.build_key = None
+            if self.panel == "build":
+                self.panel = None
         else:
             self.mode = m
-            self.panel = "build_picker" if m == "build" else None
+            self.panel = "build" if m == "build" else None
         A.play("click")
 
-    def _toggle_panel(self, p):
+    def _toggle(self, p):
         self.panel = None if self.panel == p else p
+        self.scroll.offset = 0
+        if p != "build" and self.mode == "build":
+            self.mode = "look"
+            self.build_key = None
         A.play("click")
+
+    def _speed(self, sp):
+        if sp == 0:
+            self.g.paused = not self.g.paused
+        else:
+            self.g.paused = False
+            self.g.speed = sp
+        A.play("click")
+
+    def _collect_all(self):
+        if self.g.collect_all() == 0:
+            self.g.notify("Nothing ready to collect yet.", "warn")
 
     def _save(self):
-        if self.app.slot is None:
-            return
-        S.save(self.app.slot, self.app.game.to_dict())
-        self.app.game.notify("Game saved.", "good")
-        A.play("cash")
+        if self.app.slot is not None:
+            S.save(self.app.slot, self.g.to_dict())
+            self.g.notify("Game saved.", "good")
+            A.play("cash")
 
-    # ------------- update -------------
+    # ---------- update ----------
     def update(self, dt):
-        keys = pygame.key.get_pressed()
-        self.cam.update(dt, keys)
-        g = self.app.game
-        g.tick(dt)
-        # autosave
-        self.autosave_at -= dt
-        if self.autosave_at <= 0:
-            self.autosave_at = 60.0
+        self.cam.update(dt, pygame.key.get_pressed())
+        self.g.tick(dt)
+        for b in self.bottom + self.speed_btns:
+            b.update(dt)
+        self.autosave_in -= dt
+        if self.autosave_in <= 0:
+            self.autosave_in = 45.0
             if self.app.slot is not None:
-                S.save(self.app.slot, self.app.game.to_dict())
+                S.save(self.app.slot, self.g.to_dict())
 
-    # ------------- world drawing -------------
-    def _shelter_bounds(self):
-        w = C.COLUMNS * C.CELL_W
-        h = C.FLOOR_COUNT * C.CELL_H
-        return pygame.Rect(0, 0, w, h)
-
-    def _draw_world(self, surf):
-        # Background — sky above, dirt for the shelter area
+    # ---------- world ----------
+    def _draw_world(self, s):
         vp = self.cam.viewport
-        pygame.draw.rect(surf, C.BG_SKY_BOTTOM, vp)
-        # gradient sky
-        for i in range(vp.h):
-            t = i / vp.h
-            c = (int(C.BG_SKY_TOP[0]*(1-t)+C.BG_SKY_BOTTOM[0]*t),
-                 int(C.BG_SKY_TOP[1]*(1-t)+C.BG_SKY_BOTTOM[1]*t),
-                 int(C.BG_SKY_TOP[2]*(1-t)+C.BG_SKY_BOTTOM[2]*t))
-            pygame.draw.line(surf, c, (vp.x, vp.y + i), (vp.right, vp.y + i))
+        g = self.g
+        z = self.cam.qzoom
+        prev_clip = s.get_clip()
+        s.set_clip(vp)
 
-        # World layers
-        bounds = self._shelter_bounds()
-        # Dirt behind the shelter
-        top_left = self.cam.world_to_screen(bounds.x - 200, 0)
-        bottom_right = self.cam.world_to_screen(bounds.right + 200, bounds.h + 400)
-        dirt_rect = pygame.Rect(top_left[0], top_left[1],
-                                bottom_right[0] - top_left[0], bottom_right[1] - top_left[1])
-        pygame.draw.rect(surf, C.BG_DIRT_TOP, dirt_rect.clip(vp))
+        # sky gradient
+        for y in range(vp.y, vp.bottom, 3):
+            t = (y - vp.y) / max(1, vp.h)
+            c = (int(C.BG_SKY_TOP[0] * (1 - t) + C.BG_SKY_BOTTOM[0] * t),
+                 int(C.BG_SKY_TOP[1] * (1 - t) + C.BG_SKY_BOTTOM[1] * t),
+                 int(C.BG_SKY_TOP[2] * (1 - t) + C.BG_SKY_BOTTOM[2] * t))
+            pygame.draw.rect(s, c, (vp.x, y, vp.w, 3))
 
-        # Grid cells
+        # earth behind the shelter
+        gx0, gy0 = self.cam.world_to_screen(-C.CELL_W * 3, 0)
+        gx1, gy1 = self.cam.world_to_screen(C.COLUMNS * C.CELL_W + C.CELL_W * 3,
+                                            C.FLOOR_COUNT * C.CELL_H + C.CELL_H * 3)
+        earth = pygame.Rect(gx0, gy0, gx1 - gx0, gy1 - gy0).clip(vp)
+        if earth.h > 0:
+            for y in range(earth.y, earth.bottom, 4):
+                t = (y - earth.y) / max(1, earth.h)
+                c = (int(C.BG_DIRT_TOP[0] * (1 - t) + C.BG_DIRT_BOTTOM[0] * t),
+                     int(C.BG_DIRT_TOP[1] * (1 - t) + C.BG_DIRT_BOTTOM[1] * t),
+                     int(C.BG_DIRT_TOP[2] * (1 - t) + C.BG_DIRT_BOTTOM[2] * t))
+                pygame.draw.rect(s, c, (earth.x, y, earth.w, 4))
+
+        cw = C.CELL_W * z
+        chh = C.CELL_H * z
+
+        # empty grid cells
         for f in range(C.FLOOR_COUNT):
+            sy = self.cam.world_to_screen(0, f * C.CELL_H)[1]
+            if sy + chh < vp.y or sy > vp.bottom:
+                continue
             for cx in range(C.COLUMNS):
-                wx = cx * C.CELL_W
-                wy = f * C.CELL_H
-                sx, sy = self.cam.world_to_screen(wx, wy)
-                sw = C.CELL_W * self.cam.zoom
-                sh = C.CELL_H * self.cam.zoom
-                if sx + sw < vp.x or sx > vp.right: continue
-                if sy + sh < vp.y or sy > vp.bottom: continue
-                r = pygame.Rect(sx, sy, sw + 1, sh + 1)
-                pygame.draw.rect(surf, C.GRID_EMPTY, r)
-                pygame.draw.rect(surf, C.GRID_LINE, r, 1)
+                sx = self.cam.world_to_screen(cx * C.CELL_W, 0)[0]
+                if sx + cw < vp.x or sx > vp.right:
+                    continue
+                r = pygame.Rect(sx, sy, cw + 1, chh + 1)
+                pygame.draw.rect(s, C.GRID_EMPTY, r)
+                pygame.draw.rect(s, C.GRID_LINE, r, 1)
 
-        # Rooms
-        g = self.app.game
+        frame = int(g.time * 7) % 8
+        self._collect_badges = []
+
+        # rooms
         for room in g.rooms.values():
-            wx = room.x * C.CELL_W
-            wy = room.floor * C.CELL_H
-            sx, sy = self.cam.world_to_screen(wx, wy)
-            sw = room.width * C.CELL_W * self.cam.zoom
-            sh = C.CELL_H * self.cam.zoom
-            if sx + sw < vp.x or sx > vp.right: continue
-            if sy + sh < vp.y or sy > vp.bottom: continue
+            sx, sy = self.cam.world_to_screen(room.x * C.CELL_W, room.floor * C.CELL_H)
+            rw, rh = room.width * cw, chh
+            if sx + rw < vp.x or sx > vp.right or sy + rh < vp.y or sy > vp.bottom:
+                continue
             powered = (not room.data().get("requires_power")) or g.resources.get("power", 0) > 0
-            spr = G.room_sprite(room.key, room.width, room.level, powered)
-            spr2 = pygame.transform.scale(spr, (int(sw), int(sh)))
-            surf.blit(spr2, (sx, sy))
-            # Overlays
+            fr = frame if room.workers or room.key == "elevator" else 0
+            spr = G.room_sprite(room.key, room.width, room.level, powered, fr)
+            s.blit(scaled(spr, rw, rh,
+                          f"{room.key}{room.width}{room.level}{powered}{fr}"), (sx, sy))
+
+            if room.flash > 0:
+                fl = pygame.Surface((int(rw), int(rh)), pygame.SRCALPHA)
+                fl.fill((255, 240, 180, int(110 * room.flash)))
+                s.blit(fl, (sx, sy))
             if room.on_fire:
-                overlay = pygame.Surface((int(sw), int(sh)), pygame.SRCALPHA)
-                overlay.fill((255, 90, 20, 90))
-                surf.blit(overlay, (sx, sy))
-            # progress bar
-            if room.workers and room.key not in ("elevator", "storage"):
-                r = pygame.Rect(sx + 4, sy + sh - 6, sw - 8, 3)
-                pygame.draw.rect(surf, (30, 30, 30), r)
-                fr = r.copy(); fr.w = int(r.w * room.progress)
-                pygame.draw.rect(surf, C.UI_GOOD, fr)
-            # hp bar if damaged
+                ov = pygame.Surface((int(rw), int(rh)), pygame.SRCALPHA)
+                ov.fill((255, 96, 24, 84))
+                s.blit(ov, (sx, sy))
+                for k in range(6):
+                    fx = sx + 12 + ((k * 37 + int(g.time * 90)) % max(1, rw - 24))
+                    fy = sy + rh - 14 - ((int(g.time * 130) + k * 29) % int(max(10, rh * 0.7)))
+                    pygame.draw.circle(s, (255, 170 + (k % 3) * 26, 60),
+                                       (int(fx), int(fy)), max(2, int(6 * z)))
+
+            # production progress
+            if room.workers and room.is_producer():
+                br = pygame.Rect(sx + U.s(4), sy + rh - U.s(7), rw - U.s(8), U.s(4))
+                pygame.draw.rect(s, (24, 24, 28), br)
+                fr2 = br.copy()
+                fr2.w = int(br.w * room.progress)
+                pygame.draw.rect(s, C.UI_GOOD, fr2)
             if room.hp < 100:
-                r = pygame.Rect(sx + 4, sy + 4, sw - 8, 3)
-                pygame.draw.rect(surf, (60, 20, 20), r)
-                fr = r.copy(); fr.w = int(r.w * room.hp / 100)
-                pygame.draw.rect(surf, (220, 60, 60), fr)
-            # selection outline
+                br = pygame.Rect(sx + U.s(4), sy + U.s(4), rw - U.s(8), U.s(4))
+                pygame.draw.rect(s, (56, 18, 18), br)
+                fr2 = br.copy()
+                fr2.w = int(br.w * room.hp / 100)
+                pygame.draw.rect(s, (226, 70, 62), fr2)
+
             if self.selected_room == room.id:
-                pygame.draw.rect(surf, C.UI_ACCENT, (sx, sy, sw, sh), 2)
+                pygame.draw.rect(s, C.UI_ACCENT, (sx, sy, rw, rh), max(2, U.s(2)))
 
-        # Residents
-        for res in g.residents.values():
-            if res.on_expedition: continue
-            wx = res.x * C.CELL_W + C.CELL_W / 2
-            wy = res.floor * C.CELL_H + C.CELL_H - 20
-            sx, sy = self.cam.world_to_screen(wx, wy)
-            sprite = G.resident_sprite(res.portrait_seed,
-                                       (res.power_armor or {}).get("name"),
-                                       res.facing,
-                                       res.step,
-                                       (res.outfit or {}).get("rarity", 0))
-            ssw = int(sprite.get_width() * self.cam.zoom)
-            ssh = int(sprite.get_height() * self.cam.zoom)
-            scaled = pygame.transform.scale(sprite, (ssw, ssh))
-            surf.blit(scaled, (int(sx - ssw / 2), int(sy - ssh)))
-            # health bar if hurt
-            if res.hp < res.max_hp:
-                r = pygame.Rect(int(sx - 12), int(sy - ssh - 6), 24, 3)
-                pygame.draw.rect(surf, (60, 20, 20), r)
-                fr = r.copy(); fr.w = int(r.w * res.hp / res.max_hp)
-                pygame.draw.rect(surf, (220, 60, 60), fr)
-            # selection ring
-            if self.selected_resident == res.id:
-                pygame.draw.circle(surf, C.UI_ACCENT,
-                                   (int(sx), int(sy - 2)), 12, 2)
-
-        # Combat sparks and fire particles
-        for room in g.rooms.values():
+            # invader marker
             if room.invaders:
-                wx = room.x * C.CELL_W + room.width * C.CELL_W / 2
-                wy = room.floor * C.CELL_H + 12
-                sx, sy = self.cam.world_to_screen(wx, wy)
-                pygame.draw.polygon(surf, (240, 80, 80),
-                                    [(sx - 8, sy), (sx + 8, sy), (sx, sy - 10)])
-                U.text(surf, f"! {len(room.invaders)}", (sx, sy - 24),
-                       (255, 200, 200), size=12, center=True, bold=True)
-            if room.on_fire:
-                wx = room.x * C.CELL_W + room.width * C.CELL_W / 2
-                wy = room.floor * C.CELL_H + C.CELL_H / 2
-                sx, sy = self.cam.world_to_screen(wx, wy)
-                for k in range(4):
-                    off = (k * 7 + int(g.time * 8)) % 14
-                    pygame.draw.circle(surf, (255, 160 + k * 20, 40),
-                                       (int(sx + (k - 2) * 6), int(sy - off)), 4 - k // 2)
+                mx = sx + rw / 2
+                my = sy + U.s(14)
+                pulse = 1.0 + 0.18 * math.sin(g.time * 8)
+                sz = int(U.s(11) * pulse)
+                pygame.draw.polygon(s, (240, 74, 66),
+                                    [(mx - sz, my + sz), (mx + sz, my + sz), (mx, my - sz)])
+                U.text(s, str(len(room.invaders)), (mx, my + sz * 0.25),
+                       (255, 235, 235), size=13, center=True, bold=True)
 
-        # Build ghost
+            # collect badge
+            if room.has_output():
+                bw2, bh2 = U.s(46), U.s(28)
+                bob = math.sin(g.time * 4 + room.id) * U.s(3)
+                br = pygame.Rect(sx + rw / 2 - bw2 / 2, sy - bh2 - U.s(4) + bob, bw2, bh2)
+                pygame.draw.rect(s, (250, 200, 70), br, border_radius=U.s(6))
+                pygame.draw.rect(s, (140, 100, 20), br, max(1, U.s(2)), border_radius=U.s(6))
+                U.text(s, "!", br.center, (52, 36, 6), size=20, center=True, bold=True)
+                self._collect_badges.append((br, room.id))
+
+        # residents
+        for res in g.residents.values():
+            if res.on_expedition:
+                continue
+            wx = res.x * C.CELL_W + C.CELL_W / 2
+            wy = res.floor * C.CELL_H + C.CELL_H - U.s(6) / max(0.1, z)
+            sx, sy = self.cam.world_to_screen(wx, wy)
+            if sx < vp.x - 60 or sx > vp.right + 60 or sy < vp.y - 80 or sy > vp.bottom + 80:
+                continue
+            spr = G.resident_sprite(
+                res.portrait_seed, (res.power_armor or {}).get("name"), res.facing,
+                res.step, (res.outfit or {}).get("rarity", 0), res.age,
+                res.activity, res.pregnant, not res.alive, res.is_robot)
+            sw = int(spr.get_width() * z * 1.35)
+            sh = int(spr.get_height() * z * 1.35)
+            key = (f"{res.portrait_seed}{(res.power_armor or {}).get('name')}{res.facing}"
+                   f"{res.step}{(res.outfit or {}).get('rarity',0)}{res.age}{res.activity}"
+                   f"{res.pregnant}{res.alive}{res.is_robot}")
+            s.blit(scaled(spr, sw, sh, key), (int(sx - sw / 2), int(sy - sh)))
+
+            if res.alive and res.hp < res.effective_max_hp():
+                bw2 = U.s(28)
+                br = pygame.Rect(int(sx - bw2 / 2), int(sy - sh - U.s(8)), bw2, U.s(4))
+                pygame.draw.rect(s, (56, 18, 18), br)
+                f2 = br.copy()
+                f2.w = int(br.w * res.hp / max(1, res.effective_max_hp()))
+                pygame.draw.rect(s, (226, 70, 62), f2)
+            if res.pregnant:
+                U.text(s, "+", (sx, sy - sh - U.s(20)), (250, 190, 230),
+                       size=16, center=True, bold=True)
+            if self.selected_resident == res.id:
+                pygame.draw.circle(s, C.UI_ACCENT, (int(sx), int(sy - U.s(3))),
+                                   int(U.s(16) * z + U.s(6)), max(2, U.s(2)))
+
+        # floating text
+        for fl in g.floaters:
+            t = fl.age / fl.life
+            wx = fl.x * C.CELL_W + C.CELL_W / 2
+            wy = fl.floor * C.CELL_H + C.CELL_H * 0.4
+            sx, sy = self.cam.world_to_screen(wx, wy)
+            sy += fl.vy * fl.age
+            img = U.font(16, True).render(fl.text, True, fl.color)
+            img.set_alpha(max(0, int(255 * (1 - t ** 2))))
+            s.blit(img, (sx - img.get_width() // 2, sy))
+
+        # build ghost
         if self.mode == "build" and self.build_key:
             mx, my = pygame.mouse.get_pos()
-            wx, wy = self.cam.screen_to_world(mx, my)
-            fl = max(0, min(C.FLOOR_COUNT - 1, int(wy // C.CELL_H)))
-            col = int(wx // C.CELL_W)
-            self.build_floor = fl
-            self.build_x = col
-            width = 1 if self.build_key == "elevator" else self.build_width
-            self._draw_ghost(surf, self.build_key, fl, col, width)
+            if vp.collidepoint(mx, my):
+                wx, wy = self.cam.screen_to_world(mx, my)
+                fl = max(0, min(C.FLOOR_COUNT - 1, int(wy // C.CELL_H)))
+                width = 1 if self.build_key == "elevator" else self.build_width
+                col = int(math.floor(wx / C.CELL_W - width / 2 + 0.5))
+                if self.build_key == "elevator":
+                    col = g.elevator_col
+                self._ghost = (fl, col, width)
+                ok, why = g.can_place(self.build_key, fl, col, width)
+                gx, gy = self.cam.world_to_screen(col * C.CELL_W, fl * C.CELL_H)
+                gw, gh = width * cw, chh
+                ov = pygame.Surface((int(gw), int(gh)), pygame.SRCALPHA)
+                ov.fill((96, 216, 118, 96) if ok else (222, 66, 60, 104))
+                s.blit(ov, (gx, gy))
+                pygame.draw.rect(s, (110, 230, 130) if ok else (232, 78, 70),
+                                 (gx, gy, gw, gh), max(2, U.s(2)))
+                cost = g.build_cost(self.build_key, width)
+                label = f"{D.ROOMS[self.build_key]['name']} — {cost} caps" if ok else why
+                U.text(s, label, (gx + gw / 2, gy - U.s(20)),
+                       (210, 250, 215) if ok else (250, 200, 195),
+                       size=15, center=True, bold=True, shadow=True)
+            else:
+                self._ghost = None
+        else:
+            self._ghost = None
 
-    def _draw_ghost(self, surf, key, floor, x, width):
-        ok, why = self.app.game.can_place(key, floor, x, width)
-        wx = x * C.CELL_W
-        wy = floor * C.CELL_H
-        sx, sy = self.cam.world_to_screen(wx, wy)
-        sw = width * C.CELL_W * self.cam.zoom
-        sh = C.CELL_H * self.cam.zoom
-        color = (100, 220, 120, 100) if ok else (220, 60, 60, 110)
-        s = pygame.Surface((int(sw), int(sh)), pygame.SRCALPHA)
-        s.fill(color)
-        surf.blit(s, (sx, sy))
-        pygame.draw.rect(surf, color[:3], (sx, sy, sw, sh), 2)
-        if not ok:
-            U.text(surf, why, (sx + sw / 2, sy - 14),
-                   (240, 200, 200), size=13, center=True, bold=True)
+        s.set_clip(prev_clip)
 
-    # ------------- HUD & panels -------------
-    def _draw_hud(self, surf):
-        w, h = surf.get_size()
-        g = self.app.game
-        # top bar
-        top = pygame.Rect(0, 0, w, 88)
-        pygame.draw.rect(surf, C.UI_BG, top)
-        pygame.draw.line(surf, C.UI_BORDER, (0, 88), (w, 88), 1)
-        # resource tiles
+    # ---------- HUD ----------
+    def _draw_hud(self, s):
+        w, h = s.get_size()
+        g = self.g
+        top_h = U.s(HUD_TOP)
+        pygame.draw.rect(s, C.UI_BG, (0, 0, w, top_h))
+        pygame.draw.line(s, C.UI_BORDER, (0, top_h), (w, top_h), max(1, U.s(1)))
+
         tiles = [
-            ("Caps", g.caps, 99999, C.UI_ACCENT),
+            ("Caps", g.caps, None, C.UI_ACCENT),
             ("Power", int(g.resources.get("power", 0)), g.storage_cap["power"], C.UI_WARN),
             ("Water", int(g.resources.get("water", 0)), g.storage_cap["water"], C.UI_BLUE),
-            ("Food",  int(g.resources.get("food", 0)),  g.storage_cap["food"],  (140, 200, 120)),
-            ("Materials", int(g.resources.get("materials", 0)), g.storage_cap["materials"], (180, 150, 120)),
-            ("Stimpacks", int(g.resources.get("stim", 0)), g.storage_cap["stim"], (220, 100, 100)),
-            ("RadAway", int(g.resources.get("radaway", 0)), g.storage_cap["radaway"], (140, 220, 210)),
-            ("Pop", len(g.residents), g.housing_cap(), (200, 190, 240)),
+            ("Food", int(g.resources.get("food", 0)), g.storage_cap["food"], (150, 210, 128)),
+            ("Materials", int(g.resources.get("materials", 0)),
+             g.storage_cap["materials"], (188, 158, 124)),
+            ("Stimpaks", int(g.resources.get("stim", 0)), g.storage_cap["stim"], (226, 108, 108)),
+            ("RadAway", int(g.resources.get("radaway", 0)),
+             g.storage_cap["radaway"], (140, 224, 214)),
+            ("Residents", g.population(), g.housing_cap(), (206, 194, 246)),
         ]
-        x = 12
-        for name, v, cap, col in tiles:
-            r = pygame.Rect(x, 12, 138, 62)
-            pygame.draw.rect(surf, C.UI_BG2, r, border_radius=4)
-            pygame.draw.rect(surf, C.UI_BORDER, r, 1, border_radius=4)
-            U.text(surf, name, (r.x + 10, r.y + 6), C.UI_TEXT_DIM, size=13)
-            U.text(surf, f"{v}", (r.x + 10, r.y + 22), col, size=22, bold=True)
-            bar = pygame.Rect(r.x + 10, r.bottom - 12, r.w - 20, 6)
-            U.draw_bar(surf, bar, v, cap, col)
-            x += 148
-        # right side: time and average happiness
-        avg_happy = 100.0
-        if g.residents:
-            avg_happy = sum(r.happiness for r in g.residents.values()) / len(g.residents)
-        happy_col = C.UI_GOOD if avg_happy > 60 else C.UI_WARN if avg_happy > 30 else C.UI_BAD
-        happy_r = pygame.Rect(w - 160, 12, 148, 62)
-        pygame.draw.rect(surf, C.UI_BG2, happy_r, border_radius=4)
-        pygame.draw.rect(surf, C.UI_BORDER, happy_r, 1, border_radius=4)
-        U.text(surf, "Happiness", (happy_r.x + 10, happy_r.y + 6), C.UI_TEXT_DIM, size=13)
-        U.text(surf, f"{int(avg_happy)}%", (happy_r.x + 10, happy_r.y + 22), happy_col, size=22, bold=True)
-        U.draw_bar(surf, pygame.Rect(happy_r.x + 10, happy_r.bottom - 12, happy_r.w - 20, 6),
-                   avg_happy, 100, happy_col)
+        # Identity block on the left, so nothing collides with the tile row.
+        idw = U.s(150)
+        ident = pygame.Rect(U.s(10), U.s(13), idw, U.s(66))
+        pygame.draw.rect(s, C.UI_BG2, ident, border_radius=U.s(5))
+        pygame.draw.rect(s, C.UI_ACCENT_DIM, ident, max(1, U.s(1)), border_radius=U.s(5))
+        U.text(s, f"HAVEN {g.vault_number}", (ident.centerx, ident.y + U.s(10)),
+               C.UI_ACCENT, size=19, bold=True, center=True)
+        mins = int(g.time // 60)
+        U.text(s, f"Day {mins // 20 + 1} · {mins} min", (ident.centerx, ident.y + U.s(32)),
+               C.UI_TEXT_DIM, size=13, center=True)
+        if g.paused:
+            U.text(s, "PAUSED", (ident.centerx, ident.y + U.s(49)), C.UI_WARN,
+                   size=14, center=True, bold=True)
+        else:
+            U.text(s, f"{int(g.speed)}x speed", (ident.centerx, ident.y + U.s(49)),
+                   C.UI_TEXT_DIM, size=13, center=True)
+
+        # Tiles fill whatever space is left between the identity and right cluster.
+        right_w = U.s(240)
+        gap = U.s(7)
+        avail = w - ident.right - gap - right_w - U.s(10)
+        tw = max(U.s(78), (avail - gap * (len(tiles) - 1)) // len(tiles))
+        th = U.s(66)
+        x = ident.right + gap
+        self._tile_rects = []
+        for name, val, cap, col in tiles:
+            r = pygame.Rect(x, U.s(13), tw, th)
+            pygame.draw.rect(s, C.UI_BG2, r, border_radius=U.s(5))
+            frac = (val / cap) if cap else 1.0
+            crit, low = frac < 0.08, frac < 0.20
+            edge = C.UI_BAD if crit else (C.UI_WARN if low else C.UI_BORDER)
+            pygame.draw.rect(s, edge, r, max(1, U.s(2 if crit else 1)),
+                             border_radius=U.s(5))
+            U.text(s, U.trim(name, 12, tw - U.s(12)), (r.x + U.s(8), r.y + U.s(6)),
+                   C.UI_TEXT_DIM, size=12)
+            U.text(s, f"{val}", (r.x + U.s(8), r.y + U.s(21)), col, size=22, bold=True)
+            if cap:
+                U.draw_bar(s, pygame.Rect(r.x + U.s(8), r.bottom - U.s(13),
+                                          r.w - U.s(16), U.s(6)), val, cap, col)
+                U.text(s, f"/{cap}", (r.right - U.s(8), r.y + U.s(7)),
+                       C.UI_TEXT_DIM, size=11, right=True)
+            self._tile_rects.append((r, name, val, cap))
+            x += tw + gap
+
+        # right cluster: happiness, lunchboxes, clock
+        happy = (sum(r.happiness for r in g.residents.values() if r.alive)
+                 / max(1, len([r for r in g.residents.values() if r.alive])))
+        hc = C.UI_GOOD if happy > 60 else C.UI_WARN if happy > 30 else C.UI_BAD
+        hr = pygame.Rect(w - U.s(158), U.s(13), U.s(148), th)
+        pygame.draw.rect(s, C.UI_BG2, hr, border_radius=U.s(5))
+        pygame.draw.rect(s, C.UI_BORDER, hr, max(1, U.s(1)), border_radius=U.s(5))
+        U.text(s, "Happiness", (hr.x + U.s(10), hr.y + U.s(6)), C.UI_TEXT_DIM, size=13)
+        U.text(s, f"{int(happy)}%", (hr.x + U.s(10), hr.y + U.s(22)), hc, size=24, bold=True)
+        U.draw_bar(s, pygame.Rect(hr.x + U.s(10), hr.bottom - U.s(13),
+                                  hr.w - U.s(20), U.s(6)), happy, 100, hc)
+        smiley = ":)" if happy > 60 else ":|" if happy > 30 else ":("
+        U.text(s, smiley, (hr.right - U.s(14), hr.y + U.s(24)), hc,
+               size=22, bold=True, right=True)
+
+        lb = pygame.Rect(w - U.s(228), U.s(13), U.s(62), th)
+        hov = lb.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(s, (58, 40, 30) if g.lunchboxes else C.UI_BG2, lb,
+                         border_radius=U.s(5))
+        pygame.draw.rect(s, C.UI_ACCENT if (g.lunchboxes and hov) else C.UI_BORDER, lb,
+                         max(1, U.s(1)), border_radius=U.s(5))
+        ic = G.lunchbox_icon(U.s(34))
+        s.blit(ic, (lb.centerx - ic.get_width() // 2, lb.y + U.s(6)))
+        U.text(s, str(g.lunchboxes), (lb.centerx, lb.bottom - U.s(13)),
+               C.UI_ACCENT if g.lunchboxes else C.UI_TEXT_DIM,
+               size=15, center=True, bold=True)
+        self._lunch_rect = lb
 
         # bottom bar
-        bot = pygame.Rect(0, h - 44, w, 44)
-        pygame.draw.rect(surf, C.UI_BG, bot)
-        pygame.draw.line(surf, C.UI_BORDER, (0, h - 44), (w, h - 44), 1)
-        for b in self.buttons_bottom:
+        by = h - U.s(HUD_BOT)
+        pygame.draw.rect(s, C.UI_BG, (0, by, w, U.s(HUD_BOT)))
+        pygame.draw.line(s, C.UI_BORDER, (0, by), (w, by), max(1, U.s(1)))
+        for b in self.bottom:
             if b.label == "Build":
                 b.style = "primary" if self.mode == "build" else "normal"
-            if b.label == "Destroy":
+            elif b.label == "Demolish":
                 b.style = "danger" if self.mode == "destroy" else "normal"
-            b.draw(surf)
-        for b in self.buttons_speed:
+            elif b.label == "Collect All":
+                b.style = "good" if any(r.has_output() for r in g.rooms.values()) else "normal"
+            b.draw(s)
+        for b in self.speed_btns:
             if b.label == "Pause":
-                b.style = "primary" if g.paused else "ghost"
-            elif b.label == f"{int(g.speed)}x" and not g.paused:
-                b.style = "primary"
+                b.style = "primary" if g.paused else "normal"
             else:
-                b.style = "normal" if b.label != "Pause" else b.style
-            b.draw(surf)
+                b.style = ("primary" if (not g.paused and b.label == f"{int(g.speed)}x")
+                           else "normal")
+            b.draw(s)
 
-        # notifications ticker
-        recent = g.notifications[-3:]
-        for i, (t, lvl, txt) in enumerate(reversed(recent)):
+        # notification ticker
+        y = by - U.s(26)
+        for t, lvl, txt in reversed(g.notifications[-4:]):
             age = g.time - t
-            if age > 12: break
-            alpha = max(0, min(255, int(255 * (1 - age / 12))))
+            if age > 10:
+                break
             col = {"good": C.UI_GOOD, "bad": C.UI_BAD,
-                   "warn": C.UI_WARN, "info": C.UI_TEXT}.get(lvl, C.UI_TEXT)
-            r = U.font(14).render(f"• {txt}", True, col)
-            r.set_alpha(alpha)
-            surf.blit(r, (16, h - 100 - i * 18))
+                   "warn": C.UI_WARN}.get(lvl, C.UI_TEXT)
+            img = U.font(15).render("• " + txt, True, col)
+            img.set_alpha(max(0, min(255, int(255 * (1 - age / 10)))))
+            s.blit(img, (U.s(14), y))
+            y -= U.s(22)
 
-    # ------------- panels -------------
-    def _draw_panel(self, surf):
-        if self.panel is None: return
-        w, h = surf.get_size()
-        rect = pygame.Rect(w - 420, 92, 400, h - 92 - 48)
-        if self.panel == "build_picker":
-            self._draw_build_picker(surf, rect)
-        elif self.panel == "residents":
-            self._draw_residents_panel(surf, rect)
-        elif self.panel == "inventory":
-            self._draw_inventory_panel(surf, rect)
-        elif self.panel == "exploration":
-            self._draw_exploration_panel(surf, rect)
-        elif self.panel == "objectives":
-            self._draw_objectives_panel(surf, rect)
-        elif self.panel == "menu":
-            self._draw_menu_panel(surf, rect)
-        # room detail panel (opens on the left when a room is selected)
-        if self.selected_room:
-            room = self.app.game.rooms.get(self.selected_room)
-            if room:
-                left = pygame.Rect(16, 92, 320, 260)
-                self._draw_room_detail(surf, left, room)
-        if self.selected_resident:
-            res = self.app.game.residents.get(self.selected_resident)
-            if res:
-                left = pygame.Rect(16, 360, 320, 320)
-                self._draw_resident_detail(surf, left, res)
+    # ---------- panels ----------
+    def _panel_rect(self):
+        w, h = self.app.size
+        return pygame.Rect(w - U.s(PANEL_W) - U.s(10), U.s(HUD_TOP) + U.s(8),
+                           U.s(PANEL_W), h - U.s(HUD_TOP) - U.s(HUD_BOT) - U.s(18))
 
-    def _draw_build_picker(self, surf, rect):
-        U.panel(surf, rect, "Construction")
-        # width control
-        U.text(surf, f"Width: {self.build_width} cells", (rect.x + 12, rect.y + 40))
-        self._bp_wm = pygame.Rect(rect.x + 130, rect.y + 38, 28, 20)
-        self._bp_wp = pygame.Rect(rect.x + 160, rect.y + 38, 28, 20)
-        for r, lbl in [(self._bp_wm, "-"), (self._bp_wp, "+")]:
-            pygame.draw.rect(surf, C.UI_BG2, r, border_radius=3)
-            pygame.draw.rect(surf, C.UI_BORDER, r, 1, border_radius=3)
-            U.text(surf, lbl, r.center, C.UI_TEXT, size=15, center=True, bold=True)
-        # list rooms
-        list_r = pygame.Rect(rect.x + 8, rect.y + 64, rect.w - 16, rect.h - 72)
-        self._bp_items = []
-        y = list_r.y - self.list_scroll.offset
-        clip = surf.get_clip()
-        surf.set_clip(list_r)
+    def _draw_panels(self, s):
+        if self.panel:
+            r = self._panel_rect()
+            fn = {
+                "build": self._p_build, "residents": self._p_residents,
+                "inventory": self._p_inventory, "exploration": self._p_explore,
+                "objectives": self._p_objectives, "menu": self._p_menu,
+                "lunchbox": self._p_lunchbox,
+            }.get(self.panel)
+            if fn:
+                fn(s, r)
+        for rect, fn in self._left_panels():
+            fn(s, rect)
+
+    def _left_panels(self):
+        """Left-hand detail panels, clamped so they never cover the bottom bar."""
+        h = self.app.size[1]
+        limit = h - U.s(HUD_BOT) - U.s(8)
+        out = []
+        top = U.s(HUD_TOP) + U.s(8)
+        if self.selected_room and self.selected_room in self.g.rooms:
+            rh = min(U.s(276), limit - top)
+            if rh > U.s(120):
+                out.append((pygame.Rect(U.s(14), top, U.s(340), rh), self._p_room))
+                top += rh + U.s(10)
+        if self.selected_resident and self.selected_resident in self.g.residents:
+            rh = min(U.s(372), limit - top)
+            if rh > U.s(150):
+                out.append((pygame.Rect(U.s(14), top, U.s(340), rh), self._p_resident))
+        return out
+
+    # -- build picker
+    def _p_build(self, s, r):
+        U.panel(s, r, "Construction")
+        g = self.g
+        y0 = r.y + U.s(40)
+        U.text(s, "Width", (r.x + U.s(12), y0 + U.s(3)), C.UI_TEXT, size=15)
+        self._w_minus = pygame.Rect(r.x + U.s(70), y0, U.s(28), U.s(24))
+        self._w_plus = pygame.Rect(r.x + U.s(134), y0, U.s(28), U.s(24))
+        for rr, lbl in ((self._w_minus, "-"), (self._w_plus, "+")):
+            pygame.draw.rect(s, C.UI_BG2, rr, border_radius=U.s(3))
+            pygame.draw.rect(s, C.UI_BORDER, rr, max(1, U.s(1)), border_radius=U.s(3))
+            U.text(s, lbl, rr.center, C.UI_TEXT, size=17, center=True, bold=True)
+        U.text(s, str(self.build_width), (r.x + U.s(116), y0 + U.s(3)),
+               C.UI_ACCENT, size=17, center=True, bold=True)
+        U.text(s, "Merged rooms produce more.", (r.x + U.s(174), y0 + U.s(4)),
+               C.UI_TEXT_DIM, size=13)
+
+        area = pygame.Rect(r.x + U.s(8), y0 + U.s(34), r.w - U.s(16),
+                           r.bottom - (y0 + U.s(42)))
+        self.scroll.rect = area
+        prev = s.get_clip()
+        s.set_clip(area)
+        y = area.y - int(self.scroll.offset)
+        self._build_rows = []
+        mouse = pygame.mouse.get_pos()
         for key in D.ROOM_ORDER + ["elevator"]:
             rd = D.ROOMS[key]
-            r = pygame.Rect(list_r.x, y, list_r.w - 6, 56)
-            hovered = r.collidepoint(pygame.mouse.get_pos())
-            selected = key == self.build_key
-            bg = C.UI_BG2 if hovered else C.UI_BG
-            if selected: bg = (60, 50, 20)
-            pygame.draw.rect(surf, bg, r, border_radius=4)
-            pygame.draw.rect(surf, C.UI_ACCENT_DIM if selected else C.UI_BORDER, r, 1, border_radius=4)
-            spr = G.room_sprite(key, max(1, rd.get("width", 2)), 1, True)
-            spr2 = pygame.transform.scale(spr, (50, 50))
-            surf.blit(spr2, (r.x + 4, r.y + 3))
-            U.text(surf, rd["name"], (r.x + 60, r.y + 6), C.UI_ACCENT, size=15, bold=True)
-            U.text(surf, f"{rd['cost']} caps", (r.x + 60, r.y + 24), C.UI_TEXT_DIM, size=13)
-            U.text(surf, rd.get("desc", "")[:38], (r.x + 60, r.y + 38), C.UI_TEXT_DIM, size=12)
-            self._bp_items.append((r, key))
-            y += 60
-        self.list_scroll.rect = list_r
-        self.list_scroll.content_h = y + int(self.list_scroll.offset) - list_r.y
-        surf.set_clip(clip)
-        self.list_scroll.draw_scrollbar(surf)
+            row = pygame.Rect(area.x, y, area.w - U.s(8), U.s(66))
+            if row.bottom > area.y and row.y < area.bottom:
+                sel = key == self.build_key
+                hov = row.collidepoint(mouse)
+                bg = (62, 52, 22) if sel else (C.UI_BG2 if hov else C.UI_BG)
+                pygame.draw.rect(s, bg, row, border_radius=U.s(5))
+                pygame.draw.rect(s, C.UI_ACCENT if sel else C.UI_BORDER, row,
+                                 max(1, U.s(1)), border_radius=U.s(5))
+                thumb = G.room_sprite(key, 1, 1, True, 0)
+                s.blit(scaled(thumb, U.s(62), U.s(56), f"thumb{key}"),
+                       (row.x + U.s(4), row.y + U.s(5)))
+                tx = row.x + U.s(74)
+                U.text(s, rd["name"], (tx, row.y + U.s(7)), C.UI_ACCENT, size=16, bold=True)
+                w2 = 1 if key == "elevator" else max(self.build_width, rd["width"])
+                cost = g.build_cost(key, w2)
+                afford = g.caps >= cost
+                U.text(s, f"{cost} caps", (tx, row.y + U.s(27)),
+                       C.UI_TEXT if afford else C.UI_BAD, size=14, bold=True)
+                U.text(s, U.trim(rd.get("desc", ""), 12, row.w - U.s(84)),
+                       (tx, row.y + U.s(45)), C.UI_TEXT_DIM, size=12)
+                self._build_rows.append((row, key))
+            y += U.s(70)
+        self.scroll.content_h = y + int(self.scroll.offset) - area.y
+        s.set_clip(prev)
+        self.scroll.draw_scrollbar(s)
 
-    def _draw_room_detail(self, surf, rect, room):
-        U.panel(surf, rect, room.data()["name"] + f" — Lv {room.level}")
-        y = rect.y + 40
+    # -- room detail
+    def _p_room(self, s, r):
+        room = self.g.rooms[self.selected_room]
         rd = room.data()
-        U.text(surf, rd.get("desc", ""), (rect.x + 12, y), C.UI_TEXT_DIM, size=13)
-        y += 22
-        # capacity + workers
-        U.text(surf, f"Workers: {len(room.workers)}/{room.capacity()}",
-               (rect.x + 12, y), C.UI_TEXT, size=14)
-        y += 18
+        U.panel(s, r, f"{rd['name']} · Level {room.level}")
+        y = r.y + U.s(40)
+        U.text(s, U.trim(rd.get("desc", ""), 13, r.w - U.s(24)),
+               (r.x + U.s(12), y), C.UI_TEXT_DIM, size=13)
+        y += U.s(22)
+        if room.capacity():
+            U.text(s, f"Staff  {len(room.workers)}/{room.capacity()}",
+                   (r.x + U.s(12), y), C.UI_TEXT, size=15, bold=True)
+            stat = self.g.best_stat_for(room)
+            if stat:
+                U.text(s, f"Best stat: {D.STAT_NAMES[stat]}",
+                       (r.right - U.s(12), y), C.UI_ACCENT, size=13, right=True)
+            y += U.s(20)
         prod = ", ".join(f"+{v * room.level * room.width_units()} {k}"
-                         for k, v in room.produces().items())
-        if prod: U.text(surf, "Produces: " + prod, (rect.x + 12, y), C.UI_GOOD, size=13); y += 16
+                         for k, v in room.produces().items() if k != "attract")
+        if prod:
+            U.text(s, prod, (r.x + U.s(12), y), C.UI_GOOD, size=13)
+            y += U.s(17)
         cons = ", ".join(f"-{v * room.level * room.width_units()} {k}"
                          for k, v in room.consumes().items())
-        if cons: U.text(surf, "Consumes: " + cons, (rect.x + 12, y), C.UI_BAD, size=13); y += 16
-        # buttons
-        by = rect.bottom - 40
-        self._rd_upgrade = pygame.Rect(rect.x + 12, by, 100, 28)
-        self._rd_merge = pygame.Rect(rect.x + 118, by, 100, 28)
-        self._rd_destroy = pygame.Rect(rect.right - 92, by, 80, 28)
-        cost = rd.get("upgrade", 0) * room.level * room.width_units()
-        for r, lbl, col in [
-            (self._rd_upgrade, f"Upgrade {cost}c" if cost > 0 else "—",
-                C.UI_ACCENT_DIM if cost == 0 else C.UI_ACCENT),
-            (self._rd_merge, "Merge", C.UI_ACCENT),
-            (self._rd_destroy, "Destroy", (180, 80, 80)),
-        ]:
-            pygame.draw.rect(surf, C.UI_BG2, r, border_radius=4)
-            pygame.draw.rect(surf, col, r, 1, border_radius=4)
-            U.text(surf, lbl, r.center, col, size=13, center=True, bold=True)
+        if cons:
+            U.text(s, cons, (r.x + U.s(12), y), C.UI_BAD, size=13)
+            y += U.s(17)
+        if room.stored:
+            got = ", ".join(f"{int(v)} {k}" for k, v in room.stored.items() if v)
+            if got:
+                U.text(s, "Ready: " + got, (r.x + U.s(12), y), C.UI_ACCENT,
+                       size=13, bold=True)
+                y += U.s(17)
 
-    def _draw_resident_detail(self, surf, rect, res: GM.Resident):
-        U.panel(surf, rect, res.name)
-        # portrait
+        bw, bh = U.s(100), U.s(30)
+        bx, byy = r.x + U.s(12), r.bottom - U.s(80)
+        self._room_btns = {}
+        cost = self.g.upgrade_cost(room)
+        specs = [
+            ("collect", "Collect", room.has_output(), "good"),
+            ("rush", "Rush", room.can_rush(), "primary"),
+            ("staff", "Assign", len(room.workers) < room.capacity(), "normal"),
+            ("upgrade", f"Upgrade {cost}" if cost and room.level < 3 else "Max level",
+             cost > 0 and room.level < 3 and self.g.caps >= cost, "normal"),
+            ("merge", "Merge", room.key != "elevator", "normal"),
+            ("destroy", "Demolish", True, "danger"),
+        ]
+        for i, (kk, label, enabled, style) in enumerate(specs):
+            rr = pygame.Rect(bx + (i % 3) * (bw + U.s(8)),
+                             byy + (i // 3) * (bh + U.s(8)), bw, bh)
+            b = U.Button(rr, label, None, style=style, enabled=enabled, size=13)
+            b.hover = rr.collidepoint(pygame.mouse.get_pos())
+            b._anim = 1.0 if b.hover else 0.0
+            b.draw(s)
+            self._room_btns[kk] = (rr, enabled)
+        if room.can_rush():
+            pct = int(room.rush_failure_chance() * 100)
+            U.text(s, f"Rush risk {pct}%", (r.right - U.s(12), byy - U.s(18)),
+                   C.UI_WARN, size=12, right=True)
+
+    # -- resident detail
+    def _p_resident(self, s, r):
+        res = self.g.residents[self.selected_resident]
+        U.panel(s, r, res.name)
         port = G.resident_portrait(res.portrait_seed, (res.outfit or {}).get("rarity", 0),
-                                   (res.power_armor or {}).get("name"))
-        p2 = pygame.transform.scale(port, (96, 96))
-        surf.blit(p2, (rect.x + 12, rect.y + 40))
-        # header info
-        U.text(surf, f"Level {res.level}", (rect.x + 120, rect.y + 42), C.UI_ACCENT, size=16, bold=True)
-        U.text(surf, res.activity.title(), (rect.x + 120, rect.y + 62), C.UI_TEXT_DIM, size=13)
-        # HP
-        hp_r = pygame.Rect(rect.x + 120, rect.y + 82, 180, 12)
-        U.draw_bar(surf, hp_r, res.hp, res.max_hp, C.UI_BAD, f"HP {int(res.hp)}/{res.max_hp}", small=True)
-        # XP
-        xp_r = pygame.Rect(rect.x + 120, rect.y + 96, 180, 10)
-        U.draw_bar(surf, xp_r, res.xp, res.xp_needed(), C.UI_ACCENT, f"XP {res.xp}/{res.xp_needed()}", small=True)
-        # happiness
-        hp2 = pygame.Rect(rect.x + 120, rect.y + 110, 180, 10)
-        U.draw_bar(surf, hp2, res.happiness, 100, C.UI_GOOD, f"{int(res.happiness)}% happy", small=True)
+                                   (res.power_armor or {}).get("name"), res.age,
+                                   res.gender, not res.alive)
+        ps = U.s(104)
+        s.blit(scaled(port, ps, ps, f"p{res.id}{res.alive}{(res.power_armor or {}).get('name')}"
+                                    f"{(res.outfit or {}).get('rarity',0)}{res.age}"),
+               (r.x + U.s(12), r.y + U.s(42)))
+        tx = r.x + U.s(126)
+        ty = r.y + U.s(44)
+        tag = "Deceased" if not res.alive else ("Child" if res.age == "child" else
+                                                res.activity.title())
+        U.text(s, f"Level {res.level}", (tx, ty), C.UI_ACCENT, size=18, bold=True)
+        U.text(s, tag, (tx, ty + U.s(22)), C.UI_BAD if not res.alive else C.UI_TEXT_DIM, size=14)
+        if res.pregnant:
+            U.text(s, f"Expecting ({int(res.preg_timer)}s)", (tx, ty + U.s(40)),
+                   (250, 190, 230), size=13, bold=True)
+        bw2 = r.w - U.s(138)
+        U.draw_bar(s, pygame.Rect(tx, ty + U.s(58), bw2, U.s(14)), res.hp,
+                   res.effective_max_hp(), C.UI_BAD,
+                   f"HP {int(res.hp)}/{res.effective_max_hp()}", small=True)
+        U.draw_bar(s, pygame.Rect(tx, ty + U.s(76), bw2, U.s(12)), res.xp,
+                   res.xp_needed(), C.UI_BLUE, f"XP {res.xp}/{res.xp_needed()}", small=True)
+        U.draw_bar(s, pygame.Rect(tx, ty + U.s(92), bw2, U.s(12)), res.happiness, 100,
+                   C.UI_GOOD, f"{int(res.happiness)}% happy", small=True)
 
-        # SPECIAL
-        y = rect.y + 148
+        y = r.y + U.s(162)
+        if res.rads > 0:
+            U.draw_bar(s, pygame.Rect(r.x + U.s(12), y, r.w - U.s(24), U.s(12)),
+                       res.rads, res.max_hp, (140, 224, 120),
+                       f"Radiation {int(res.rads)}", small=True)
+            y += U.s(18)
         for i, k in enumerate(D.STAT_KEYS):
-            col = rect.x + 12 + (i % 4) * 74
-            row = y + (i // 4) * 20
-            U.text(surf, f"{k}: {res.stat_total(k)}", (col, row), C.UI_TEXT, size=13, bold=True)
-        y = rect.y + 200
-        # equipment
-        U.text(surf, "Weapon: " + (res.weapon["name"] if res.weapon else "—"),
-               (rect.x + 12, y), C.UI_TEXT, size=13); y += 16
-        U.text(surf, "Outfit: " + (res.outfit["name"] if res.outfit else "—"),
-               (rect.x + 12, y), C.UI_TEXT, size=13); y += 16
-        pa = res.power_armor
-        if pa:
-            U.text(surf, f"Power Armor: {pa['name']} ({pa['durability']}/{pa['max_durability']})",
-                   (rect.x + 12, y), C.UI_ACCENT, size=13, bold=True); y += 16
+            col = r.x + U.s(12) + (i % 7) * U.s(45)
+            base = res.stats.get(k, 1)
+            tot = res.stat_total(k)
+            U.text(s, k, (col + U.s(16), y), C.UI_TEXT_DIM, size=12, center=True)
+            U.text(s, str(tot), (col + U.s(16), y + U.s(15)),
+                   C.UI_ACCENT if tot > base else C.UI_TEXT,
+                   size=17, center=True, bold=True)
+        y += U.s(40)
+
+        for label, item, col in (("Weapon", res.weapon, C.UI_TEXT),
+                                 ("Outfit", res.outfit, C.UI_TEXT),
+                                 ("Armor", res.power_armor, C.UI_ACCENT)):
+            nm = item["name"] if item else "—"
+            if item and label == "Armor":
+                nm += f"  ({item['durability']}/{item['max_durability']})"
+            U.text(s, f"{label}: {U.trim(nm, 13, r.w - U.s(90))}",
+                   (r.x + U.s(12), y), col if item else C.UI_TEXT_DIM, size=13,
+                   bold=(label == "Armor" and item is not None))
+            y += U.s(18)
+
+        bw, bh = U.s(100), U.s(30)
+        bx, byy = r.x + U.s(12), r.bottom - U.s(76)
+        self._res_btns = {}
+        if res.alive:
+            specs = [
+                ("stim", "Stimpak", self.g.resources.get("stim", 0) > 0
+                 and res.hp < res.effective_max_hp(), "good"),
+                ("rad", "RadAway", self.g.resources.get("radaway", 0) > 0
+                 and res.rads > 0, "normal"),
+                ("unassign", "Unassign", res.assigned_room is not None, "normal"),
+                ("explore", "Explore", res.age == "adult" and not res.on_expedition, "primary"),
+                ("repair", "Repair", res.power_armor is not None, "normal"),
+                ("focus", "Find", True, "normal"),
+            ]
         else:
-            U.text(surf, "Power Armor: —", (rect.x + 12, y), C.UI_TEXT_DIM, size=13); y += 16
-        # actions
-        by = rect.bottom - 40
-        self._rs_stim = pygame.Rect(rect.x + 12, by, 100, 28)
-        self._rs_expl = pygame.Rect(rect.x + 118, by, 100, 28)
-        self._rs_repair = pygame.Rect(rect.right - 92, by, 80, 28)
-        for r, lbl in [(self._rs_stim, "Stimpack"), (self._rs_expl, "Expedition"),
-                       (self._rs_repair, "Repair PA")]:
-            pygame.draw.rect(surf, C.UI_BG2, r, border_radius=4)
-            pygame.draw.rect(surf, C.UI_ACCENT, r, 1, border_radius=4)
-            U.text(surf, lbl, r.center, C.UI_ACCENT, size=12, center=True, bold=True)
+            specs = [("revive", f"Revive {res.revive_cost()}",
+                      self.g.caps >= res.revive_cost(), "primary"),
+                     ("focus", "Find", True, "normal")]
+        for i, (kk, label, enabled, style) in enumerate(specs):
+            rr = pygame.Rect(bx + (i % 3) * (bw + U.s(8)),
+                             byy + (i // 3) * (bh + U.s(8)), bw, bh)
+            b = U.Button(rr, label, None, style=style, enabled=enabled, size=13)
+            b.hover = rr.collidepoint(pygame.mouse.get_pos())
+            b._anim = 1.0 if b.hover else 0.0
+            b.draw(s)
+            self._res_btns[kk] = (rr, enabled)
 
-    def _draw_residents_panel(self, surf, rect):
-        U.panel(surf, rect, "Residents")
-        g = self.app.game
-        list_r = pygame.Rect(rect.x + 8, rect.y + 40, rect.w - 16, rect.h - 48)
-        surf.set_clip(list_r)
-        y = list_r.y - self.list_scroll.offset
-        self._rp_items = []
-        for res in g.residents.values():
-            r = pygame.Rect(list_r.x, y, list_r.w - 6, 54)
-            sel = res.id == self.selected_resident
-            pygame.draw.rect(surf, C.UI_BG2 if sel else C.UI_BG, r, border_radius=4)
-            pygame.draw.rect(surf, C.UI_ACCENT if sel else C.UI_BORDER, r, 1, border_radius=4)
-            port = G.resident_portrait(res.portrait_seed, (res.outfit or {}).get("rarity", 0),
-                                       (res.power_armor or {}).get("name"))
-            surf.blit(pygame.transform.scale(port, (48, 48)), (r.x + 4, r.y + 3))
-            U.text(surf, res.name, (r.x + 56, r.y + 4), C.UI_ACCENT, size=14, bold=True)
-            U.text(surf, f"Lv {res.level} · {res.activity}", (r.x + 56, r.y + 22),
-                   C.UI_TEXT_DIM, size=12)
-            U.text(surf, f"HP {int(res.hp)}/{res.max_hp} · {int(res.happiness)}% happy",
-                   (r.x + 56, r.y + 36), C.UI_TEXT_DIM, size=11)
-            self._rp_items.append((r, res.id))
-            y += 58
-        self.list_scroll.rect = list_r
-        self.list_scroll.content_h = y + int(self.list_scroll.offset) - list_r.y
-        surf.set_clip(None)
-        self.list_scroll.draw_scrollbar(surf)
+    # -- residents list
+    def _p_residents(self, s, r):
+        g = self.g
+        U.panel(s, r, f"Residents  ({g.population()}/{g.housing_cap()})")
+        area = pygame.Rect(r.x + U.s(8), r.y + U.s(40), r.w - U.s(16), r.h - U.s(48))
+        self.scroll.rect = area
+        prev = s.get_clip()
+        s.set_clip(area)
+        y = area.y - int(self.scroll.offset)
+        self._res_rows = []
+        mouse = pygame.mouse.get_pos()
+        order = sorted(g.residents.values(),
+                       key=lambda x: (not x.alive, x.age == "child", -x.level))
+        for res in order:
+            row = pygame.Rect(area.x, y, area.w - U.s(8), U.s(62))
+            if row.bottom > area.y and row.y < area.bottom:
+                sel = res.id == self.selected_resident
+                hov = row.collidepoint(mouse)
+                pygame.draw.rect(s, (58, 48, 20) if sel else (C.UI_BG2 if hov else C.UI_BG),
+                                 row, border_radius=U.s(5))
+                pygame.draw.rect(s, C.UI_ACCENT if sel else C.UI_BORDER, row,
+                                 max(1, U.s(1)), border_radius=U.s(5))
+                port = G.resident_portrait(res.portrait_seed,
+                                           (res.outfit or {}).get("rarity", 0),
+                                           (res.power_armor or {}).get("name"),
+                                           res.age, res.gender, not res.alive)
+                s.blit(scaled(port, U.s(52), U.s(52), f"lp{res.id}{res.alive}"
+                                                      f"{(res.power_armor or {}).get('name')}"
+                                                      f"{(res.outfit or {}).get('rarity',0)}"),
+                       (row.x + U.s(4), row.y + U.s(5)))
+                tx = row.x + U.s(62)
+                U.text(s, U.trim(res.name, 15, row.w - U.s(140)),
+                       (tx, row.y + U.s(5)), C.UI_ACCENT, size=15, bold=True)
+                where = "—"
+                if res.on_expedition:
+                    where = "Wasteland"
+                elif res.assigned_room and res.assigned_room in g.rooms:
+                    where = g.rooms[res.assigned_room].data()["name"]
+                elif not res.alive:
+                    where = "Deceased"
+                elif res.age == "child":
+                    where = "Child"
+                U.text(s, f"Lv{res.level} · {U.trim(where, 12, row.w - U.s(150))}",
+                       (tx, row.y + U.s(24)), C.UI_TEXT_DIM, size=12)
+                U.draw_bar(s, pygame.Rect(tx, row.y + U.s(42), U.s(96), U.s(9)),
+                           res.hp, res.effective_max_hp(), C.UI_BAD)
+                U.draw_bar(s, pygame.Rect(tx + U.s(104), row.y + U.s(42), U.s(96), U.s(9)),
+                           res.happiness, 100, C.UI_GOOD)
+                best = max(D.STAT_KEYS, key=lambda k: res.stat_total(k))
+                U.text(s, f"{best}{res.stat_total(best)}",
+                       (row.right - U.s(10), row.y + U.s(6)),
+                       C.UI_TEXT, size=14, right=True, bold=True)
+                self._res_rows.append((row, res.id))
+            y += U.s(66)
+        self.scroll.content_h = y + int(self.scroll.offset) - area.y
+        s.set_clip(prev)
+        self.scroll.draw_scrollbar(s)
 
-    def _draw_inventory_panel(self, surf, rect):
-        U.panel(surf, rect, f"Inventory ({len(self.app.game.inventory)}) · PA ({len(self.app.game.pa_storage)})")
-        g = self.app.game
-        # Tabs
-        self.inv_tabs = getattr(self, "inv_tabs", U.TabBar((rect.x + 8, rect.y + 36, rect.w - 16, 26),
-                                                          ["Items", "Power Armor", "Crafting"]))
-        self.inv_tabs.rect.topleft = (rect.x + 8, rect.y + 36)
-        self.inv_tabs.rect.width = rect.w - 16
-        self.inv_tabs.draw(surf)
-        area = pygame.Rect(rect.x + 8, rect.y + 68, rect.w - 16, rect.h - 76)
-        surf.set_clip(area)
-        self._inv_items = []
-        y = area.y - self.list_scroll.offset
-        if self.inv_tabs.active == 0:
+    # -- inventory
+    def _p_inventory(self, s, r):
+        g = self.g
+        U.panel(s, r, "Inventory")
+        self._inv_tabs = U.TabBar((r.x + U.s(8), r.y + U.s(38), r.w - U.s(16), U.s(28)),
+                                  ["Items", "Power Armor", "Craft"], self.inv_tab)
+        self._inv_tabs.draw(s)
+        if self.selected_resident and self.selected_resident in g.residents:
+            who = g.residents[self.selected_resident].name
+            U.text(s, f"Equipping: {U.trim(who, 12, r.w - U.s(120))}",
+                   (r.x + U.s(12), r.y + U.s(72)), C.UI_ACCENT, size=13, bold=True)
+        else:
+            U.text(s, "Select a resident to equip items.",
+                   (r.x + U.s(12), r.y + U.s(72)), C.UI_TEXT_DIM, size=13)
+
+        area = pygame.Rect(r.x + U.s(8), r.y + U.s(92), r.w - U.s(16), r.bottom - r.y - U.s(100))
+        self.scroll.rect = area
+        prev = s.get_clip()
+        s.set_clip(area)
+        y = area.y - int(self.scroll.offset)
+        self._inv_rows = []
+        self._craft_rows = []
+        mouse = pygame.mouse.get_pos()
+
+        if self.inv_tab == 0:
+            if not g.inventory:
+                U.text(s, "Nothing stored. Craft or explore to find gear.",
+                       (area.x + U.s(6), area.y + U.s(6)), C.UI_TEXT_DIM, size=14)
             for i, it in enumerate(g.inventory):
-                r = pygame.Rect(area.x, y, area.w - 6, 46)
-                pygame.draw.rect(surf, C.UI_BG2, r, border_radius=4)
-                pygame.draw.rect(surf, C.UI_BORDER, r, 1, border_radius=4)
-                if it["kind"] == "weapon":
-                    ico = G.weapon_icon(it["name"])
-                elif it["kind"] == "outfit":
-                    ico = G.outfit_icon(it["name"])
-                else:
-                    ico = U.font(14).render("*", True, C.UI_TEXT)
-                surf.blit(ico, (r.x + 4, r.y + 6))
-                U.text(surf, it["name"], (r.x + 44, r.y + 6),
-                       [C.UI_TEXT, C.UI_TEXT, C.UI_BLUE, (200, 140, 240), C.UI_ACCENT][min(4, it.get("rarity", 0))],
-                       size=15, bold=True)
-                U.text(surf, it.get("desc", ""), (r.x + 44, r.y + 24), C.UI_TEXT_DIM, size=12)
-                # sell / scrap
-                sb = pygame.Rect(r.right - 130, r.y + 8, 60, 28)
-                cb = pygame.Rect(r.right - 66, r.y + 8, 56, 28)
-                pygame.draw.rect(surf, C.UI_BG, sb, border_radius=3)
-                pygame.draw.rect(surf, C.UI_BORDER, sb, 1, border_radius=3)
-                U.text(surf, f"Sell {it.get('value',1)//2}", sb.center, C.UI_ACCENT, size=12, center=True)
-                pygame.draw.rect(surf, C.UI_BG, cb, border_radius=3)
-                pygame.draw.rect(surf, C.UI_BORDER, cb, 1, border_radius=3)
-                U.text(surf, "Scrap", cb.center, C.UI_TEXT, size=12, center=True)
-                self._inv_items.append((r, sb, cb, i))
-                y += 48
-        elif self.inv_tabs.active == 1:
-            for i, it in enumerate(g.pa_storage):
-                r = pygame.Rect(area.x, y, area.w - 6, 66)
-                pygame.draw.rect(surf, C.UI_BG2, r, border_radius=4)
-                pygame.draw.rect(surf, C.UI_ACCENT_DIM, r, 1, border_radius=4)
-                surf.blit(G.pa_icon(it["name"]), (r.x + 4, r.y + 8))
-                U.text(surf, it["name"], (r.x + 60, r.y + 6), C.UI_ACCENT, size=16, bold=True)
-                U.text(surf, f"AR {it.get('armor',0)} · DR {it.get('dr',0)}%", (r.x + 60, r.y + 26),
-                       C.UI_TEXT, size=12)
-                U.text(surf, it.get("desc", "")[:44], (r.x + 60, r.y + 42), C.UI_TEXT_DIM, size=11)
-                self._inv_items.append((r, None, None, ("pa", i)))
-                y += 68
-        else:
-            # crafting UI (data-driven)
-            U.text(surf, "Weapons", (area.x + 4, y), C.UI_ACCENT, size=15, bold=True); y += 22
-            self._craft_btns = []
-            for rar in range(5):
-                r = pygame.Rect(area.x, y, area.w - 6, 34)
-                pygame.draw.rect(surf, C.UI_BG2, r, border_radius=4)
-                pygame.draw.rect(surf, C.UI_BORDER, r, 1, border_radius=4)
-                cost = {0: 5, 1: 12, 2: 25, 3: 60, 4: 140}[rar]
-                caps = {0: 20, 1: 60, 2: 150, 3: 400, 4: 900}[rar]
-                U.text(surf, f"Craft T{rar+1} Weapon", (r.x + 8, r.y + 8), C.UI_TEXT, size=13, bold=True)
-                U.text(surf, f"{cost} mat · {caps} caps", (r.x + 8, r.y + 22), C.UI_TEXT_DIM, size=12)
-                b = pygame.Rect(r.right - 76, r.y + 4, 68, 26)
-                pygame.draw.rect(surf, C.UI_ACCENT, b, border_radius=3)
-                U.text(surf, "Craft", b.center, (30, 22, 8), size=13, center=True, bold=True)
-                self._craft_btns.append((b, "weapon", rar))
-                y += 38
-            y += 6
-            U.text(surf, "Outfits", (area.x + 4, y), C.UI_ACCENT, size=15, bold=True); y += 22
-            for rar in range(5):
-                r = pygame.Rect(area.x, y, area.w - 6, 34)
-                pygame.draw.rect(surf, C.UI_BG2, r, border_radius=4)
-                pygame.draw.rect(surf, C.UI_BORDER, r, 1, border_radius=4)
-                cost = {0: 5, 1: 12, 2: 25, 3: 60, 4: 140}[rar]
-                caps = {0: 20, 1: 60, 2: 150, 3: 400, 4: 900}[rar]
-                U.text(surf, f"Craft T{rar+1} Outfit", (r.x + 8, r.y + 8), C.UI_TEXT, size=13, bold=True)
-                U.text(surf, f"{cost} mat · {caps} caps", (r.x + 8, r.y + 22), C.UI_TEXT_DIM, size=12)
-                b = pygame.Rect(r.right - 76, r.y + 4, 68, 26)
-                pygame.draw.rect(surf, C.UI_ACCENT, b, border_radius=3)
-                U.text(surf, "Craft", b.center, (30, 22, 8), size=13, center=True, bold=True)
-                self._craft_btns.append((b, "outfit", rar))
-                y += 38
-        self.list_scroll.rect = area
-        self.list_scroll.content_h = y + int(self.list_scroll.offset) - area.y
-        surf.set_clip(None)
-        self.list_scroll.draw_scrollbar(surf)
+                row = pygame.Rect(area.x, y, area.w - U.s(8), U.s(56))
+                if row.bottom > area.y and row.y < area.bottom:
+                    hov = row.collidepoint(mouse)
+                    pygame.draw.rect(s, C.UI_BG2 if hov else C.UI_BG, row,
+                                     border_radius=U.s(5))
+                    rc = C.RARITY_COLORS[min(4, it.get("rarity", 0))]
+                    pygame.draw.rect(s, rc if hov else C.UI_BORDER, row,
+                                     max(1, U.s(1)), border_radius=U.s(5))
+                    ico = (G.weapon_icon(it["name"], U.s(40)) if it["kind"] == "weapon"
+                           else G.outfit_icon(it["name"], U.s(40)))
+                    s.blit(ico, (row.x + U.s(6), row.y + U.s(8)))
+                    tx = row.x + U.s(52)
+                    U.text(s, U.trim(it["name"], 15, row.w - U.s(180)),
+                           (tx, row.y + U.s(6)), rc, size=15, bold=True)
+                    U.text(s, f"{C.RARITY_NAMES[min(4, it.get('rarity', 0))]} · "
+                              f"{U.trim(it.get('desc',''), 12, row.w - U.s(190))}",
+                           (tx, row.y + U.s(26)), C.UI_TEXT_DIM, size=12)
+                    sb = pygame.Rect(row.right - U.s(140), row.y + U.s(13), U.s(66), U.s(30))
+                    cb = pygame.Rect(row.right - U.s(70), row.y + U.s(13), U.s(62), U.s(30))
+                    for rr, lbl, col in ((sb, f"Sell {max(1, it.get('value',1)//2)}", C.UI_ACCENT),
+                                         (cb, "Scrap", C.UI_TEXT)):
+                        pygame.draw.rect(s, C.UI_BG, rr, border_radius=U.s(3))
+                        pygame.draw.rect(s, C.UI_BORDER, rr, max(1, U.s(1)),
+                                         border_radius=U.s(3))
+                        U.text(s, lbl, rr.center, col, size=12, center=True)
+                    self._inv_rows.append((row, sb, cb, i))
+                y += U.s(60)
 
-    def _draw_exploration_panel(self, surf, rect):
-        U.panel(surf, rect, "Expeditions")
-        g = self.app.game
-        y = rect.y + 40
-        need_cmd = not any(r.key == "command" for r in g.rooms.values())
-        if need_cmd:
-            U.text(surf, "Build a Command Center to send expeditions.",
-                   (rect.x + 12, y), C.UI_BAD, size=13); y += 22
-        # Active expeditions
-        U.text(surf, "Active", (rect.x + 12, y), C.UI_ACCENT, size=15, bold=True); y += 22
-        self._exp_recall = []
+        elif self.inv_tab == 1:
+            if not g.pa_storage:
+                U.text(s, "No spare Power Armor. Explore to recover suits.",
+                       (area.x + U.s(6), area.y + U.s(6)), C.UI_TEXT_DIM, size=14)
+            for i, it in enumerate(g.pa_storage):
+                row = pygame.Rect(area.x, y, area.w - U.s(8), U.s(84))
+                if row.bottom > area.y and row.y < area.bottom:
+                    hov = row.collidepoint(mouse)
+                    pygame.draw.rect(s, C.UI_BG2 if hov else C.UI_BG, row,
+                                     border_radius=U.s(5))
+                    rc = C.RARITY_COLORS[min(4, it.get("rarity", 3))]
+                    pygame.draw.rect(s, rc, row, max(1, U.s(2 if hov else 1)),
+                                     border_radius=U.s(5))
+                    s.blit(G.pa_icon(it["name"], U.s(64)), (row.x + U.s(6), row.y + U.s(10)))
+                    tx = row.x + U.s(76)
+                    U.text(s, it["name"], (tx, row.y + U.s(6)), rc, size=16, bold=True)
+                    U.text(s, f"Armor {it.get('armor',0)} · DR {it.get('dr',0)}% · "
+                              f"Lv{it.get('level_req',0)}+",
+                           (tx, row.y + U.s(26)), C.UI_TEXT, size=13)
+                    bon = " ".join(f"+{v}{k}" for k, v in it.get("stat_bonus", {}).items())
+                    U.text(s, bon, (tx, row.y + U.s(44)), C.UI_ACCENT, size=12)
+                    U.draw_bar(s, pygame.Rect(tx, row.y + U.s(62), row.w - U.s(180), U.s(10)),
+                               it.get("durability", 0), max(1, it.get("max_durability", 1)),
+                               C.UI_BLUE, f"{it.get('durability',0)}/"
+                                          f"{it.get('max_durability',0)}", small=True)
+                    sb = pygame.Rect(row.right - U.s(78), row.y + U.s(26), U.s(68), U.s(30))
+                    pygame.draw.rect(s, C.UI_BG, sb, border_radius=U.s(3))
+                    pygame.draw.rect(s, C.UI_BORDER, sb, max(1, U.s(1)), border_radius=U.s(3))
+                    U.text(s, f"Sell {max(50, it.get('value',100)//2)}", sb.center,
+                           C.UI_ACCENT, size=11, center=True)
+                    self._inv_rows.append((row, sb, None, ("pa", i)))
+                y += U.s(88)
+
+        else:
+            has_ws = any(x.key == "workshop" for x in g.rooms.values())
+            has_arm = any(x.key == "armory" for x in g.rooms.values())
+            has_sci = any(x.key == "science" for x in g.rooms.values())
+            for kind, label in (("weapon", "Weapons"), ("outfit", "Outfits")):
+                U.text(s, label, (area.x + U.s(4), y), C.UI_ACCENT, size=16, bold=True)
+                y += U.s(24)
+                for rar in range(5):
+                    row = pygame.Rect(area.x, y, area.w - U.s(8), U.s(40))
+                    mats = GM.GameState.CRAFT_MATS[rar]
+                    caps = GM.GameState.CRAFT_CAPS[rar]
+                    gated = ((rar >= 2 and not has_ws)
+                             or (rar >= 3 and kind == "weapon" and not has_arm)
+                             or (rar >= 3 and kind != "weapon" and not has_sci))
+                    can = (not gated and g.resources.get("materials", 0) >= mats
+                           and g.caps >= caps)
+                    if row.bottom > area.y and row.y < area.bottom:
+                        pygame.draw.rect(s, C.UI_BG2, row, border_radius=U.s(5))
+                        pygame.draw.rect(s, C.UI_BORDER, row, max(1, U.s(1)),
+                                         border_radius=U.s(5))
+                        rc = C.RARITY_COLORS[rar]
+                        U.text(s, C.RARITY_NAMES[rar], (row.x + U.s(10), row.y + U.s(6)),
+                               rc, size=14, bold=True)
+                        note = (f"{mats} materials · {caps} caps" if not gated
+                                else ("Needs Workshop" if rar == 2 else
+                                      "Needs Armory" if kind == "weapon" else
+                                      "Needs Science Lab"))
+                        U.text(s, note, (row.x + U.s(10), row.y + U.s(23)),
+                               C.UI_TEXT_DIM if not gated else C.UI_BAD, size=12)
+                        b = pygame.Rect(row.right - U.s(84), row.y + U.s(5), U.s(76), U.s(30))
+                        pygame.draw.rect(s, C.UI_ACCENT if can else C.UI_BG, b,
+                                         border_radius=U.s(3))
+                        pygame.draw.rect(s, C.UI_BORDER, b, max(1, U.s(1)),
+                                         border_radius=U.s(3))
+                        U.text(s, "Craft", b.center,
+                               (28, 20, 6) if can else C.UI_TEXT_DIM,
+                               size=13, center=True, bold=can)
+                        self._craft_rows.append((b, kind, rar, can))
+                    y += U.s(44)
+                y += U.s(10)
+
+        self.scroll.content_h = y + int(self.scroll.offset) - area.y
+        s.set_clip(prev)
+        self.scroll.draw_scrollbar(s)
+
+    # -- exploration
+    def _p_explore(self, s, r):
+        g = self.g
+        U.panel(s, r, "Expeditions")
+        y = r.y + U.s(40)
+        if not any(x.key == "command" for x in g.rooms.values()):
+            U.text(s, "Build a Command Center to send expeditions.",
+                   (r.x + U.s(12), y), C.UI_BAD, size=14, bold=True)
+            y += U.s(24)
+        area = pygame.Rect(r.x + U.s(8), y, r.w - U.s(16), r.bottom - y - U.s(8))
+        self.scroll.rect = area
+        prev = s.get_clip()
+        s.set_clip(area)
+        yy = area.y - int(self.scroll.offset)
+        self._exp_btns = []
+
+        if g.expeditions:
+            U.text(s, "Out in the wasteland", (area.x + U.s(4), yy),
+                   C.UI_ACCENT, size=16, bold=True)
+            yy += U.s(24)
         for e in g.expeditions:
             res = g.residents.get(e["resident_id"])
-            if not res: continue
-            r = pygame.Rect(rect.x + 8, y, rect.w - 16, 58)
-            pygame.draw.rect(surf, C.UI_BG2, r, border_radius=4)
-            pygame.draw.rect(surf, C.UI_BORDER, r, 1, border_radius=4)
-            U.text(surf, res.name, (r.x + 8, r.y + 4), C.UI_ACCENT, size=14, bold=True)
-            U.draw_bar(surf, pygame.Rect(r.x + 8, r.y + 22, r.w - 96, 10),
-                       e["elapsed"], e["duration"], C.UI_ACCENT,
-                       f"{int(e['elapsed'])}/{int(e['duration'])}s", small=True)
-            U.text(surf, f"{e['caps']} caps · {len(e['items'])} items",
-                   (r.x + 8, r.y + 36), C.UI_TEXT_DIM, size=12)
-            rb = pygame.Rect(r.right - 88, r.y + 8, 80, 24)
-            pygame.draw.rect(surf, (110, 42, 42), rb, border_radius=3)
-            U.text(surf, "Recall", rb.center, C.UI_TEXT, size=13, center=True)
-            self._exp_recall.append((rb, res.id))
-            y += 62
-        # Available residents to send
-        y += 6
-        U.text(surf, "Send…", (rect.x + 12, y), C.UI_ACCENT, size=15, bold=True); y += 22
-        self._exp_send = []
-        area = pygame.Rect(rect.x + 8, y, rect.w - 16, rect.bottom - y - 8)
-        surf.set_clip(area)
-        yy = area.y - self.list_scroll.offset
+            if not res:
+                continue
+            box_h = U.s(112)
+            row = pygame.Rect(area.x, yy, area.w - U.s(8), box_h)
+            if row.bottom > area.y and row.y < area.bottom:
+                pygame.draw.rect(s, C.UI_BG2, row, border_radius=U.s(5))
+                pygame.draw.rect(s, C.UI_ACCENT_DIM, row, max(1, U.s(1)),
+                                 border_radius=U.s(5))
+                U.text(s, res.name, (row.x + U.s(10), row.y + U.s(6)),
+                       C.UI_ACCENT, size=15, bold=True)
+                U.draw_bar(s, pygame.Rect(row.x + U.s(10), row.y + U.s(28),
+                                          row.w - U.s(112), U.s(14)),
+                           e["elapsed"], e["duration"], C.UI_ACCENT,
+                           ("Returning" if e.get("returning") else
+                            f"{int(e['elapsed'])}s / {int(e['duration'])}s"), small=True)
+                U.text(s, f"{e['caps']} caps · {len(e['items'])} items · "
+                          f"HP {int(res.hp)}",
+                       (row.x + U.s(10), row.y + U.s(48)), C.UI_TEXT, size=12)
+                for i, line in enumerate(e["log"][-2:]):
+                    U.text(s, U.trim(line, 11, row.w - U.s(24)),
+                           (row.x + U.s(10), row.y + U.s(68) + i * U.s(16)),
+                           C.UI_TEXT_DIM, size=11)
+                rb = pygame.Rect(row.right - U.s(94), row.y + U.s(24), U.s(84), U.s(30))
+                pygame.draw.rect(s, (118, 46, 46), rb, border_radius=U.s(3))
+                U.text(s, "Recall", rb.center, C.UI_TEXT, size=13, center=True)
+                self._exp_btns.append((rb, "recall", res.id))
+            yy += box_h + U.s(8)
+
+        yy += U.s(6)
+        U.text(s, "Send someone out", (area.x + U.s(4), yy), C.UI_ACCENT, size=16, bold=True)
+        yy += U.s(24)
+        ready = any(x.key == "command" for x in g.rooms.values())
         for res in g.residents.values():
-            if res.on_expedition: continue
-            r = pygame.Rect(area.x, yy, area.w - 6, 46)
-            pygame.draw.rect(surf, C.UI_BG2, r, border_radius=4)
-            pygame.draw.rect(surf, C.UI_BORDER, r, 1, border_radius=4)
-            U.text(surf, res.name, (r.x + 8, r.y + 4), C.UI_TEXT, size=14, bold=True)
-            U.text(surf, f"Lv{res.level} · S{res.stat_total('S')} P{res.stat_total('P')} "
-                          f"E{res.stat_total('E')} L{res.stat_total('L')}",
-                   (r.x + 8, r.y + 22), C.UI_TEXT_DIM, size=12)
-            b = pygame.Rect(r.right - 78, r.y + 8, 70, 28)
-            enabled = not need_cmd
-            pygame.draw.rect(surf, C.UI_ACCENT if enabled else C.UI_BG, b, border_radius=3)
-            U.text(surf, "Send 8m", b.center, (30, 22, 8) if enabled else C.UI_TEXT_DIM,
-                   size=12, center=True, bold=True)
-            self._exp_send.append((b, res.id, enabled))
-            yy += 50
-        self.list_scroll.rect = area
-        self.list_scroll.content_h = yy + int(self.list_scroll.offset) - area.y
-        surf.set_clip(None)
-        self.list_scroll.draw_scrollbar(surf)
+            if res.on_expedition or not res.alive or res.age == "child" or res.is_robot:
+                continue
+            row = pygame.Rect(area.x, yy, area.w - U.s(8), U.s(56))
+            if row.bottom > area.y and row.y < area.bottom:
+                pygame.draw.rect(s, C.UI_BG2, row, border_radius=U.s(5))
+                pygame.draw.rect(s, C.UI_BORDER, row, max(1, U.s(1)), border_radius=U.s(5))
+                U.text(s, U.trim(res.name, 15, row.w - U.s(130)),
+                       (row.x + U.s(10), row.y + U.s(5)), C.UI_TEXT, size=15, bold=True)
+                U.text(s, f"Lv{res.level} · E{res.stat_total('E')} "
+                          f"L{res.stat_total('L')} · "
+                          f"{(res.weapon or {}).get('name', 'unarmed')}",
+                       (row.x + U.s(10), row.y + U.s(26)), C.UI_TEXT_DIM, size=12)
+                ok = ready and not res.pregnant
+                b = pygame.Rect(row.right - U.s(94), row.y + U.s(13), U.s(84), U.s(30))
+                pygame.draw.rect(s, C.UI_ACCENT if ok else C.UI_BG, b, border_radius=U.s(3))
+                pygame.draw.rect(s, C.UI_BORDER, b, max(1, U.s(1)), border_radius=U.s(3))
+                U.text(s, "Send", b.center, (28, 20, 6) if ok else C.UI_TEXT_DIM,
+                       size=13, center=True, bold=ok)
+                if ok:
+                    self._exp_btns.append((b, "send", res.id))
+            yy += U.s(60)
 
-    def _draw_objectives_panel(self, surf, rect):
-        U.panel(surf, rect, "Objectives")
-        g = self.app.game
-        y = rect.y + 40
+        self.scroll.content_h = yy + int(self.scroll.offset) - area.y
+        s.set_clip(prev)
+        self.scroll.draw_scrollbar(s)
+
+    # -- objectives
+    def _p_objectives(self, s, r):
+        g = self.g
+        done = len(g.objectives_done)
+        U.panel(s, r, f"Objectives  ({done}/{len(D.OBJECTIVES)})")
+        area = pygame.Rect(r.x + U.s(8), r.y + U.s(40), r.w - U.s(16), r.h - U.s(48))
+        self.scroll.rect = area
+        prev = s.get_clip()
+        s.set_clip(area)
+        y = area.y - int(self.scroll.offset)
         for oid, obj in D.OBJECTIVES:
-            r = pygame.Rect(rect.x + 8, y, rect.w - 16, 44)
-            done = oid in g.objectives_done
-            pygame.draw.rect(surf, (30, 60, 30) if done else C.UI_BG2, r, border_radius=4)
-            pygame.draw.rect(surf, C.UI_GOOD if done else C.UI_BORDER, r, 1, border_radius=4)
-            U.text(surf, ("✓ " if done else "· ") + obj["desc"],
-                   (r.x + 8, r.y + 6), C.UI_GOOD if done else C.UI_TEXT, size=14, bold=done)
-            if not done:
-                cur = g.objectives_progress.get(oid, 0)
-                U.draw_bar(surf, pygame.Rect(r.x + 8, r.bottom - 12, r.w - 100, 6),
-                           cur, obj["n"], C.UI_ACCENT)
-                U.text(surf, f"{cur}/{obj['n']}", (r.right - 12, r.y + 6),
-                       C.UI_TEXT_DIM, size=12, right=True)
-            else:
-                U.text(surf, f"+{obj['reward'].get('caps',0)} caps",
-                       (r.right - 12, r.y + 6), C.UI_ACCENT, size=12, right=True, bold=True)
-            y += 48
-            if y > rect.bottom - 40: break
+            row = pygame.Rect(area.x, y, area.w - U.s(8), U.s(56))
+            fin = oid in g.objectives_done
+            if row.bottom > area.y and row.y < area.bottom:
+                pygame.draw.rect(s, (26, 54, 30) if fin else C.UI_BG2, row,
+                                 border_radius=U.s(5))
+                pygame.draw.rect(s, C.UI_GOOD if fin else C.UI_BORDER, row,
+                                 max(1, U.s(1)), border_radius=U.s(5))
+                U.text(s, ("✓  " if fin else "•  ") + U.trim(obj["desc"], 14, row.w - U.s(110)),
+                       (row.x + U.s(10), row.y + U.s(7)),
+                       C.UI_GOOD if fin else C.UI_TEXT, size=14, bold=fin)
+                rw = obj.get("reward", {})
+                bits = []
+                if rw.get("caps"):
+                    bits.append(f"{rw['caps']} caps")
+                if rw.get("lunchbox"):
+                    bits.append(f"{rw['lunchbox']} lunchbox")
+                U.text(s, " + ".join(bits), (row.right - U.s(10), row.y + U.s(7)),
+                       C.UI_ACCENT, size=12, right=True, bold=True)
+                if not fin:
+                    cur = g.objectives_progress.get(oid, 0)
+                    U.draw_bar(s, pygame.Rect(row.x + U.s(10), row.bottom - U.s(20),
+                                              row.w - U.s(20), U.s(12)),
+                               cur, obj["n"], C.UI_ACCENT, f"{cur}/{obj['n']}", small=True)
+            y += U.s(60)
+        self.scroll.content_h = y + int(self.scroll.offset) - area.y
+        s.set_clip(prev)
+        self.scroll.draw_scrollbar(s)
 
-    def _draw_menu_panel(self, surf, rect):
-        U.panel(surf, rect, "Menu")
-        y = rect.y + 50
+    # -- lunchbox
+    def _p_lunchbox(self, s, r):
+        g = self.g
+        U.panel(s, r, "Lunchbox")
+        ic = G.lunchbox_icon(U.s(86))
+        s.blit(ic, (r.centerx - ic.get_width() // 2, r.y + U.s(50)))
+        y = r.y + U.s(150)
+        if g.last_lunchbox_reward:
+            U.text(s, "You found:", (r.centerx, y), C.UI_ACCENT, size=18,
+                   center=True, bold=True)
+            y += U.s(32)
+            for card in g.last_lunchbox_reward:
+                box = pygame.Rect(r.x + U.s(24), y, r.w - U.s(48), U.s(44))
+                pygame.draw.rect(s, C.UI_BG2, box, border_radius=U.s(5))
+                pygame.draw.rect(s, C.UI_ACCENT_DIM, box, max(1, U.s(1)),
+                                 border_radius=U.s(5))
+                U.text(s, U.trim(card, 15, box.w - U.s(24)),
+                       (box.centerx, box.centery), C.UI_TEXT, size=15, center=True)
+                y += U.s(52)
+        else:
+            U.text(s, "Open a lunchbox for four random rewards.",
+                   (r.centerx, y), C.UI_TEXT_DIM, size=15, center=True)
+        self._lunch_open = pygame.Rect(r.centerx - U.s(110), r.bottom - U.s(58),
+                                       U.s(220), U.s(42))
+        can = g.lunchboxes > 0
+        pygame.draw.rect(s, C.UI_ACCENT if can else C.UI_BG2, self._lunch_open,
+                         border_radius=U.s(5))
+        pygame.draw.rect(s, C.UI_BORDER, self._lunch_open, max(1, U.s(1)),
+                         border_radius=U.s(5))
+        U.text(s, f"Open ({g.lunchboxes})" if can else "None left",
+               self._lunch_open.center, (28, 20, 6) if can else C.UI_TEXT_DIM,
+               size=17, center=True, bold=True)
+
+    # -- menu
+    def _p_menu(self, s, r):
+        g = self.g
+        U.panel(s, r, "Menu")
+        y = r.y + U.s(48)
+        stats = [
+            ("Residents", f"{g.population()} / {g.housing_cap()}"),
+            ("Rooms built", str(len(g.rooms))),
+            ("Caps earned", str(g.caps_earned)),
+            ("Enemies defeated", str(g.kills)),
+            ("Expeditions", str(g.expeditions_completed)),
+            ("Children born", str(g.births)),
+            ("Deaths", str(g.deaths)),
+            ("Rushes", f"{g.rushes_ok} ok / {g.rushes_failed} failed"),
+            ("Power Armor found", str(g.pa_found)),
+        ]
+        for k, v in stats:
+            U.text(s, k, (r.x + U.s(16), y), C.UI_TEXT_DIM, size=14)
+            U.text(s, v, (r.right - U.s(16), y), C.UI_TEXT, size=14, right=True, bold=True)
+            y += U.s(22)
+        y += U.s(14)
         self._menu_btns = []
-        for lbl, cb in [
-            ("Save Now", self._save),
-            ("Settings", lambda: self.app.set_screen(SettingsScreen(self.app, back=lambda: self.app.set_screen(WorldScreen(self.app))))),
-            ("Main Menu", lambda: self.app.set_screen(MainMenuScreen(self.app))),
-            ("Quit to Desktop", lambda: setattr(self.app, "running", False)),
-        ]:
-            r = pygame.Rect(rect.x + 12, y, rect.w - 24, 36)
-            pygame.draw.rect(surf, C.UI_BG2, r, border_radius=4)
-            pygame.draw.rect(surf, C.UI_ACCENT_DIM, r, 1, border_radius=4)
-            U.text(surf, lbl, r.center, C.UI_ACCENT, size=15, center=True, bold=True)
-            self._menu_btns.append((r, cb))
-            y += 44
+        for label, cb, style in (
+            ("Save Now", self._save, "good"),
+            ("Settings", lambda: self.app.set_screen(
+                SettingsScreen(self.app, lambda: self.app.set_screen(self))), "normal"),
+            ("Main Menu", self._to_menu, "normal"),
+            ("Quit to Desktop", self._quit, "danger"),
+        ):
+            rr = pygame.Rect(r.x + U.s(16), y, r.w - U.s(32), U.s(40))
+            b = U.Button(rr, label, None, style=style, size=16)
+            b.hover = rr.collidepoint(pygame.mouse.get_pos())
+            b._anim = 1.0 if b.hover else 0.0
+            b.draw(s)
+            self._menu_btns.append((rr, cb))
+            y += U.s(48)
 
-    # ------------- draw main -------------
-    def draw(self, surf):
-        self._draw_world(surf)
-        self._draw_hud(surf)
-        self._draw_panel(surf)
+    def _to_menu(self):
+        self._save()
+        self.app.set_screen(MainMenuScreen(self.app))
 
-    # ------------- input -------------
-    def handle(self, event):
-        # camera
-        # skip camera when the mouse is over a UI panel
-        mx, my = pygame.mouse.get_pos()
-        over_ui = my < 88 or my > self.app.screen.get_height() - 44
-        if self.panel and event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP,
-                                         pygame.MOUSEMOTION, pygame.MOUSEWHEEL):
-            # scroll list
-            if self.list_scroll.handle(event):
+    def _quit(self):
+        self._save()
+        self.app.running = False
+
+    # ---------- drag ghost & draw ----------
+    def draw(self, s):
+        self._draw_world(s)
+        self._draw_hud(s)
+        self._draw_panels(s)
+        if self._drag_res is not None and self._drag_moved:
+            res = self.g.residents.get(self._drag_res)
+            if res:
+                port = G.resident_portrait(res.portrait_seed,
+                                           (res.outfit or {}).get("rarity", 0),
+                                           (res.power_armor or {}).get("name"),
+                                           res.age, res.gender, not res.alive)
+                mx, my = pygame.mouse.get_pos()
+                img = scaled(port, U.s(56), U.s(56), f"drag{res.id}")
+                img.set_alpha(215)
+                s.blit(img, (mx - U.s(28), my - U.s(28)))
+                img.set_alpha(255)
+                room = self._room_at(mx, my)
+                if room and room.capacity() > 0:
+                    sx, sy = self.cam.world_to_screen(room.x * C.CELL_W,
+                                                      room.floor * C.CELL_H)
+                    z = self.cam.qzoom
+                    full = len(room.workers) >= room.capacity()
+                    pygame.draw.rect(s, C.UI_BAD if full else C.UI_GOOD,
+                                     (sx, sy, room.width * C.CELL_W * z, C.CELL_H * z),
+                                     max(2, U.s(3)))
+        if self.tooltip:
+            U.tooltip(s, pygame.mouse.get_pos(), self.tooltip)
+        self.tooltip = None
+
+    # ---------- helpers ----------
+    def _room_at(self, mx, my):
+        if not self.cam.viewport.collidepoint(mx, my):
+            return None
+        wx, wy = self.cam.screen_to_world(mx, my)
+        return self.g.find_room(int(wy // C.CELL_H), wx / C.CELL_W)
+
+    def _resident_at(self, mx, my):
+        if not self.cam.viewport.collidepoint(mx, my):
+            return None
+        best, bd = None, U.s(30)
+        for res in self.g.residents.values():
+            if res.on_expedition:
+                continue
+            sx, sy = self.cam.world_to_screen(
+                res.x * C.CELL_W + C.CELL_W / 2,
+                res.floor * C.CELL_H + C.CELL_H - 10)
+            d = math.hypot(sx - mx, sy - my - U.s(14))
+            if d < bd:
+                bd, best = d, res
+        return best
+
+    def _over_ui(self, pos):
+        w, h = self.app.size
+        if pos[1] < U.s(HUD_TOP) or pos[1] > h - U.s(HUD_BOT):
+            return True
+        if self.panel and self._panel_rect().collidepoint(pos):
+            return True
+        return any(rect.collidepoint(pos) for rect, _ in self._left_panels())
+
+    # ---------- input ----------
+    def handle(self, e):
+        g = self.g
+        if e.type == pygame.KEYDOWN:
+            if self._key(e):
                 return
-        if not over_ui:
-            self.cam.handle(event)
+        if self.scroll.handle(e):
+            return
+        for b in self.bottom + self.speed_btns:
+            if b.handle(e):
+                return
+        if e.type == pygame.MOUSEMOTION:
+            self._hover_tooltip(e.pos)
+        if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+            if self._click_panels(e.pos):
+                return
+        if not self._over_ui(pygame.mouse.get_pos()):
+            self.cam.handle(e)
+        elif e.type == pygame.MOUSEBUTTONUP and e.button in (2, 3):
+            self.cam.handle(e)
 
-        for b in self.buttons_bottom:
-            b.handle(event)
-        for b in self.buttons_speed:
-            b.handle(event)
-
-        # keyboard shortcuts
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:
-                if self.panel: self.panel = None
-                elif self.mode != "look": self.mode = "look"; self.build_key = None
-                else: self._toggle_panel("menu")
-            elif event.key == pygame.K_SPACE:
-                self._set_speed(0 if not self.app.game.paused else int(self.app.game.speed))
-            elif event.key == pygame.K_1:
-                self._set_speed(1)
-            elif event.key == pygame.K_2:
-                self._set_speed(2)
-            elif event.key == pygame.K_3:
-                self._set_speed(4)
-            elif event.key == pygame.K_b:
-                self._toggle_mode("build")
-            elif event.key == pygame.K_r:
-                self._toggle_panel("residents")
-            elif event.key == pygame.K_i:
-                self._toggle_panel("inventory")
-            elif event.key == pygame.K_o:
-                self._toggle_panel("objectives")
-            elif event.key == pygame.K_e:
-                self._toggle_panel("exploration")
-            elif event.key == pygame.K_F5:
-                self._save()
-
-        # panel-specific handling
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self.panel == "build_picker":
-                if getattr(self, "_bp_wm", None) and self._bp_wm.collidepoint(event.pos):
-                    self.build_width = max(2, self.build_width - 1)
-                elif getattr(self, "_bp_wp", None) and self._bp_wp.collidepoint(event.pos):
-                    self.build_width = min(C.ROOM_MAX_MERGE * 2, self.build_width + 1)
-                for r, key in getattr(self, "_bp_items", []):
-                    if r.collidepoint(event.pos):
-                        self.build_key = key
-                        if key == "elevator":
-                            self.build_width = 1
-                        else:
-                            self.build_width = max(2, D.ROOMS[key]["width"])
-            elif self.panel == "residents":
-                for r, rid in getattr(self, "_rp_items", []):
-                    if r.collidepoint(event.pos):
-                        self.selected_resident = rid
-            elif self.panel == "inventory":
-                self.inv_tabs.handle(event)
-                for entry in getattr(self, "_inv_items", []):
-                    r, sb, cb, i = entry
-                    if r.collidepoint(event.pos):
-                        # equip on selected resident
-                        if self.selected_resident:
-                            g = self.app.game
-                            if isinstance(i, tuple) and i[0] == "pa":
-                                g.equip(self.selected_resident, "pa", i[1])
-                            else:
-                                it = g.inventory[i]
-                                if it["kind"] == "weapon":
-                                    g.equip(self.selected_resident, "weapon", i)
-                                elif it["kind"] == "outfit":
-                                    g.equip(self.selected_resident, "outfit", i)
-                                elif it["kind"] == "consumable" and it["name"] == "Stimpack":
-                                    g.use_stimpack(self.selected_resident)
-                                    g.inventory.pop(i)
-                    if sb and sb.collidepoint(event.pos):
-                        self.app.game.sell_item(i)
-                    if cb and cb.collidepoint(event.pos):
-                        self.app.game.scrap_item(i)
-                for b, kind, rar in getattr(self, "_craft_btns", []):
-                    if b.collidepoint(event.pos):
-                        self.app.game.craft(kind, rar)
-            elif self.panel == "exploration":
-                for b, rid in getattr(self, "_exp_recall", []):
-                    if b.collidepoint(event.pos):
-                        self.app.game.recall_expedition(rid)
-                for b, rid, enabled in getattr(self, "_exp_send", []):
-                    if enabled and b.collidepoint(event.pos):
-                        self.app.game.start_expedition(rid)
-            elif self.panel == "menu":
-                for r, cb in getattr(self, "_menu_btns", []):
-                    if r.collidepoint(event.pos):
-                        cb()
-
-            # room detail actions
-            if self.selected_room:
-                if getattr(self, "_rd_upgrade", None) and self._rd_upgrade.collidepoint(event.pos):
-                    self.app.game.upgrade_room(self.selected_room)
-                elif getattr(self, "_rd_merge", None) and self._rd_merge.collidepoint(event.pos):
-                    self.app.game.try_merge(self.selected_room)
-                elif getattr(self, "_rd_destroy", None) and self._rd_destroy.collidepoint(event.pos):
-                    self.app.game.destroy_room(self.selected_room)
-                    self.selected_room = None
-            if self.selected_resident:
-                if getattr(self, "_rs_stim", None) and self._rs_stim.collidepoint(event.pos):
-                    self.app.game.use_stimpack(self.selected_resident)
-                elif getattr(self, "_rs_expl", None) and self._rs_expl.collidepoint(event.pos):
-                    self.app.game.start_expedition(self.selected_resident)
-                elif getattr(self, "_rs_repair", None) and self._rs_repair.collidepoint(event.pos):
-                    self.app.game.repair_pa(self.selected_resident)
-
-        # world click
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not over_ui:
-            # panels can occupy right/left; if click is under a panel skip
-            if self.panel:
-                w, h = self.app.screen.get_size()
-                pr = pygame.Rect(w - 420, 92, 400, h - 92 - 48)
-                if pr.collidepoint(event.pos):
+        # world interaction
+        if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1 and not self._over_ui(e.pos):
+            for br, rid in self._collect_badges:
+                if br.collidepoint(e.pos):
+                    g.collect_room(rid)
                     return
-                if self.selected_room:
-                    left = pygame.Rect(16, 92, 320, 260)
-                    if left.collidepoint(event.pos):
-                        return
-                if self.selected_resident:
-                    left = pygame.Rect(16, 360, 320, 320)
-                    if left.collidepoint(event.pos):
-                        return
-            mx, my = event.pos
-            wx, wy = self.cam.screen_to_world(mx, my)
-            fl = int(wy // C.CELL_H)
-            col_f = wx / C.CELL_W
-            col = int(col_f)
-            if self.mode == "build" and self.build_key:
-                width = 1 if self.build_key == "elevator" else self.build_width
-                self.app.game.place_room(self.build_key, fl, col, width)
+            if self.mode == "build" and self.build_key and self._ghost:
+                fl, col, width = self._ghost
+                g.place_room(self.build_key, fl, col, width)
                 return
             if self.mode == "destroy":
-                room = self.app.game.find_room(fl, col_f)
-                if room and room.key != "elevator":
-                    self.app.game.destroy_room(room.id)
+                room = self._room_at(*e.pos)
+                if room:
+                    g.destroy_room(room.id)
                 return
-            # select
-            room = self.app.game.find_room(fl, col_f)
+            res = self._resident_at(*e.pos)
+            if res:
+                self._drag_res = res.id
+                self._drag_from = e.pos
+                self._drag_moved = False
+                return
+            room = self._room_at(*e.pos)
+            self.selected_room = room.id if room else None
             if room:
-                self.selected_room = room.id
                 self.selected_resident = None
-                # If a resident is selected in the residents panel and click is on a room, assign
+            return
+
+        if e.type == pygame.MOUSEMOTION and self._drag_res is not None:
+            if self._drag_from and (abs(e.pos[0] - self._drag_from[0]) > U.s(5)
+                                    or abs(e.pos[1] - self._drag_from[1]) > U.s(5)):
+                self._drag_moved = True
+            return
+
+        if e.type == pygame.MOUSEBUTTONUP and e.button == 1 and self._drag_res is not None:
+            rid = self._drag_res
+            moved = self._drag_moved
+            self._drag_res = None
+            self._drag_moved = False
+            if moved:
+                room = self._room_at(*e.pos)
+                if room:
+                    if room.capacity() > 0:
+                        g.assign(rid, room.id)
+                    else:
+                        g.notify(f"{room.data()['name']} has no work posts.", "bad")
             else:
-                # pick a nearby resident
-                best = None
-                best_d = 40
-                for res in self.app.game.residents.values():
-                    if res.on_expedition: continue
-                    rsx, rsy = self.cam.world_to_screen(
-                        res.x * C.CELL_W + C.CELL_W / 2,
-                        res.floor * C.CELL_H + C.CELL_H - 20)
-                    d = math.hypot(rsx - mx, rsy - my)
-                    if d < best_d:
-                        best_d = d; best = res
-                if best:
-                    self.selected_resident = best.id
+                self.selected_resident = rid
+                self.selected_room = None
+                if self.panel == "residents":
+                    pass
+            return
+
+    def _key(self, e) -> bool:
+        g = self.g
+        k = e.key
+        if k == pygame.K_ESCAPE:
+            if self.panel:
+                self.panel = None
+            elif self.mode != "look":
+                self.mode = "look"
+                self.build_key = None
+            elif self.selected_room or self.selected_resident:
+                self.selected_room = self.selected_resident = None
+            else:
+                self._toggle("menu")
+            return True
+        mapping = {pygame.K_b: "build", pygame.K_r: "residents", pygame.K_i: "inventory",
+                   pygame.K_e: "exploration", pygame.K_o: "objectives"}
+        if k in mapping:
+            if k == pygame.K_b:
+                self._mode("build")
+            else:
+                self._toggle(mapping[k])
+            return True
+        if k == pygame.K_c:
+            self._collect_all()
+            return True
+        if k == pygame.K_SPACE:
+            self._speed(0)
+            return True
+        if k in (pygame.K_1, pygame.K_2, pygame.K_3):
+            self._speed({pygame.K_1: 1, pygame.K_2: 2, pygame.K_3: 4}[k])
+            return True
+        if k == pygame.K_F5:
+            self._save()
+            return True
+        if k == pygame.K_l and g.lunchboxes > 0:
+            self._toggle("lunchbox")
+            return True
+        return False
+
+    def _hover_tooltip(self, pos):
+        for b in self.bottom:
+            if b.tooltip_lines and b.rect.collidepoint(pos):
+                self.tooltip = b.tooltip_lines
+                return
+        if getattr(self, "_lunch_rect", None) and self._lunch_rect.collidepoint(pos):
+            self.tooltip = ["Lunchboxes (L)", "Four random rewards per box."]
+            return
+        for r, name, val, cap in getattr(self, "_tile_rects", []):
+            if r.collidepoint(pos):
+                lines = [name, f"{val}" + (f" of {cap}" if cap else "")]
+                if cap and val < cap * 0.15:
+                    lines.append("Running low!")
+                self.tooltip = lines
+                return
+        if not self._over_ui(pos):
+            room = self._room_at(*pos)
+            if room:
+                rd = room.data()
+                lines = [f"{rd['name']} (Lv {room.level})"]
+                if room.capacity():
+                    lines.append(f"Staff {len(room.workers)}/{room.capacity()}")
+                if room.has_output():
+                    lines.append("Output ready — click the badge")
+                self.tooltip = lines
+
+    def _click_panels(self, pos) -> bool:
+        g = self.g
+        if getattr(self, "_lunch_rect", None) and self._lunch_rect.collidepoint(pos):
+            if g.lunchboxes > 0:
+                self._toggle("lunchbox")
+            else:
+                g.notify("No lunchboxes yet — complete objectives to earn them.", "warn")
+            return True
+
+        # room buttons
+        if self.selected_room and self.selected_room in g.rooms:
+            for kk, (rr, enabled) in getattr(self, "_room_btns", {}).items():
+                if rr.collidepoint(pos):
+                    if not enabled:
+                        return True
+                    rid = self.selected_room
+                    if kk == "collect":
+                        g.collect_room(rid)
+                    elif kk == "rush":
+                        g.rush_room(rid)
+                    elif kk == "staff":
+                        g.auto_assign_best(rid)
+                    elif kk == "upgrade":
+                        g.upgrade_room(rid)
+                    elif kk == "merge":
+                        g.try_merge(rid)
+                    elif kk == "destroy":
+                        g.destroy_room(rid)
+                        self.selected_room = None
+                    return True
+        # resident buttons
+        if self.selected_resident and self.selected_resident in g.residents:
+            for kk, (rr, enabled) in getattr(self, "_res_btns", {}).items():
+                if rr.collidepoint(pos):
+                    if not enabled:
+                        return True
+                    rid = self.selected_resident
+                    res = g.residents[rid]
+                    if kk == "stim":
+                        g.use_stimpack(rid)
+                    elif kk == "rad":
+                        g.use_radaway(rid)
+                    elif kk == "unassign":
+                        g.assign(rid, None)
+                    elif kk == "explore":
+                        g.start_expedition(rid)
+                    elif kk == "repair":
+                        g.repair_pa(rid)
+                    elif kk == "revive":
+                        g.revive(rid)
+                    elif kk == "focus":
+                        self.cam.focus(res.floor, res.x)
+                    return True
+
+        if not self.panel:
+            return False
+        pr = self._panel_rect()
+        if not pr.collidepoint(pos):
+            return False
+
+        if self.panel == "build":
+            if self._w_minus.collidepoint(pos):
+                self.build_width = max(2, self.build_width - 1)
+                return True
+            if self._w_plus.collidepoint(pos):
+                self.build_width = min(6, self.build_width + 1)
+                return True
+            for row, key in getattr(self, "_build_rows", []):
+                if row.collidepoint(pos):
+                    self.build_key = key
+                    self.mode = "build"
+                    if key == "elevator":
+                        self.build_width = 1
+                    else:
+                        self.build_width = max(D.ROOMS[key]["width"],
+                                               min(self.build_width,
+                                                   D.ROOMS[key]["width"] * C.ROOM_MAX_MERGE))
+                    A.play("click")
+                    return True
+            return True
+
+        if self.panel == "residents":
+            for row, rid in getattr(self, "_res_rows", []):
+                if row.collidepoint(pos):
+                    self.selected_resident = rid
                     self.selected_room = None
+                    res = g.residents.get(rid)
+                    if res:
+                        self.cam.focus(res.floor, res.x)
+                    return True
+            return True
 
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3 and not over_ui:
-            # right click: assign selected resident to that room
-            if self.selected_resident:
-                mx, my = event.pos
-                wx, wy = self.cam.screen_to_world(mx, my)
-                fl = int(wy // C.CELL_H)
-                col_f = wx / C.CELL_W
-                room = self.app.game.find_room(fl, col_f)
-                if room and room.data().get("staff_stat") is not None or (room and "train_stat" in room.data()):
-                    self.app.game.assign(self.selected_resident, room.id)
+        if self.panel == "inventory":
+            if self._inv_tabs.handle(pygame.event.Event(
+                    pygame.MOUSEBUTTONDOWN, button=1, pos=pos)):
+                self.inv_tab = self._inv_tabs.active
+                self.scroll.offset = 0
+                return True
+            for entry in getattr(self, "_inv_rows", []):
+                row, sb, cb, idx = entry
+                if sb and sb.collidepoint(pos):
+                    if isinstance(idx, tuple):
+                        g.sell_pa(idx[1])
+                    else:
+                        g.sell_item(idx)
+                    return True
+                if cb and cb.collidepoint(pos):
+                    g.scrap_item(idx)
+                    return True
+                if row.collidepoint(pos):
+                    if not self.selected_resident or self.selected_resident not in g.residents:
+                        g.notify("Select a resident first.", "warn")
+                        return True
+                    if isinstance(idx, tuple):
+                        g.equip(self.selected_resident, "pa", idx[1])
+                    else:
+                        it = g.inventory[idx]
+                        g.equip(self.selected_resident,
+                                "weapon" if it["kind"] == "weapon" else "outfit", idx)
+                    return True
+            for b, kind, rar, can in getattr(self, "_craft_rows", []):
+                if b.collidepoint(pos):
+                    g.craft(kind, rar)
+                    return True
+            return True
+
+        if self.panel == "exploration":
+            for b, what, rid in getattr(self, "_exp_btns", []):
+                if b.collidepoint(pos):
+                    if what == "send":
+                        g.start_expedition(rid)
+                    else:
+                        g.recall_expedition(rid)
+                    return True
+            return True
+
+        if self.panel == "lunchbox":
+            if getattr(self, "_lunch_open", None) and self._lunch_open.collidepoint(pos):
+                g.open_lunchbox()
+                return True
+            return True
+
+        if self.panel == "menu":
+            for rr, cb in getattr(self, "_menu_btns", []):
+                if rr.collidepoint(pos):
+                    cb()
+                    return True
+            return True
+        return True
 
 
-# --------------------- App ---------------------
+# ======================================================================
+# App
+# ======================================================================
 class App:
     def __init__(self):
         pygame.init()
         A.init()
         A.build_bank()
-        self.animations = True
-        self.fullscreen = False
+
         cfg = S.load_settings()
-        if cfg:
-            A.load_settings(cfg.get("audio", {}))
-            self.fullscreen = cfg.get("fullscreen", False)
-            self.animations = cfg.get("animations", True)
-        flags = pygame.RESIZABLE | pygame.DOUBLEBUF
-        if self.fullscreen: flags |= pygame.FULLSCREEN
-        self.screen = pygame.display.set_mode((C.DEFAULT_WIDTH, C.DEFAULT_HEIGHT), flags)
+        A.load_settings(cfg.get("audio", {}))
+        self.res_name = cfg.get("resolution", C.DEFAULT_RESOLUTION)
+        self.quality = cfg.get("quality", C.DEFAULT_QUALITY)
+        self.fullscreen = cfg.get("fullscreen", False)
+        if self.quality not in C.QUALITY_LEVELS:
+            self.quality = C.DEFAULT_QUALITY
+
+        w, h = self._res_size()
+        # Never open a window larger than the desktop.
+        try:
+            di = pygame.display.Info()
+            if di.current_w > 0 and (w > di.current_w or h > di.current_h):
+                for name, rw, rh in reversed(C.RESOLUTIONS):
+                    if rw <= di.current_w and rh <= di.current_h:
+                        self.res_name = name
+                        w, h = rw, rh
+                        break
+        except pygame.error:
+            pass
+
+        flags = pygame.RESIZABLE | (pygame.FULLSCREEN if self.fullscreen else 0)
+        self.renderer, self.renderer_note = R.create_renderer(
+            (w, h), flags, quality=self.quality)
         pygame.display.set_caption(C.TITLE)
+        U.set_scale(h)
         try:
             pygame.display.set_icon(G.app_icon(64))
         except Exception:
             pass
+
         self.clock = pygame.time.Clock()
         self.running = True
-        self.game: GM.GameState | None = None
-        self.slot: int | None = None
+        self.game = None
+        self.slot = None
         self.screen_obj = MainMenuScreen(self)
         A.start_music()
 
-    def save_settings(self):
-        S.save_settings(dict(audio=A.get_settings(),
-                             fullscreen=self.fullscreen,
-                             animations=self.animations))
+    # -- helpers
+    def _res_size(self):
+        for name, w, h in C.RESOLUTIONS:
+            if name == self.res_name:
+                return w, h
+        return C.DEFAULT_WIDTH, C.DEFAULT_HEIGHT
 
-    def set_fullscreen(self, on: bool):
-        self.fullscreen = on
-        flags = pygame.RESIZABLE | pygame.DOUBLEBUF
-        if on: flags |= pygame.FULLSCREEN
-        self.screen = pygame.display.set_mode(self.screen.get_size(), flags)
+    @property
+    def size(self):
+        return self.renderer.size
+
+    def save_settings(self):
+        S.save_settings(dict(audio=A.get_settings(), resolution=self.res_name,
+                             quality=self.quality, fullscreen=self.fullscreen))
+
+    def _reflow(self):
+        U.set_scale(self.size[1])
+        _scaled.clear()
+        if hasattr(self.screen_obj, "resize"):
+            self.screen_obj.resize()
+
+    def set_resolution(self, name):
+        if name == self.res_name:
+            return
+        self.res_name = name
+        w, h = self._res_size()
+        flags = pygame.RESIZABLE | (pygame.FULLSCREEN if self.fullscreen else 0)
+        self.renderer.resize((w, h), flags)
+        self._reflow()
+        self.save_settings()
+
+    def set_quality(self, q):
+        if q == self.quality or q not in C.QUALITY_LEVELS:
+            return
+        self.quality = q
+        self.renderer.set_quality(q)
+        self.save_settings()
+
+    def set_fullscreen(self, on):
+        self.fullscreen = bool(on)
+        w, h = self.size
+        flags = pygame.RESIZABLE | (pygame.FULLSCREEN if self.fullscreen else 0)
+        self.renderer.resize((w, h), flags)
+        self._reflow()
+        self.save_settings()
 
     def set_screen(self, screen):
         self.screen_obj = screen
+        if hasattr(screen, "resize"):
+            screen.resize()
+
+    def start_game(self, state, slot):
+        self.game = state
+        self.slot = slot
+        S.save(slot, state.to_dict())
+        self.set_screen(WorldScreen(self))
+
+    def _autosave_on_exit(self):
+        if self.game is not None and self.slot is not None:
+            try:
+                S.save(self.slot, self.game.to_dict())
+            except Exception:
+                pass
 
     def run(self):
         while self.running:
-            dt = self.clock.tick(C.FPS) / 1000.0
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    if self.game is not None and self.slot is not None:
-                        S.save(self.slot, self.game.to_dict())
+            dt = min(0.1, self.clock.tick(C.FPS) / 1000.0)
+            for e in pygame.event.get():
+                if e.type == pygame.QUIT:
+                    self._autosave_on_exit()
                     self.running = False
-                elif event.type == pygame.VIDEORESIZE:
-                    self.screen = pygame.display.set_mode(
-                        (max(C.MIN_WIDTH, event.w), max(C.MIN_HEIGHT, event.h)),
-                        pygame.RESIZABLE | pygame.DOUBLEBUF | (pygame.FULLSCREEN if self.fullscreen else 0))
-                    if isinstance(self.screen_obj, WorldScreen):
-                        self.screen_obj.cam.resize(*self.screen.get_size())
-                        self.screen_obj._make_hud()
-                self.screen_obj.handle(event)
+                    break
+                if e.type == pygame.VIDEORESIZE and not self.fullscreen:
+                    w = max(C.MIN_WIDTH, e.w)
+                    h = max(C.MIN_HEIGHT, e.h)
+                    self.renderer.resize((w, h), pygame.RESIZABLE)
+                    self._reflow()
+                    continue
+                self.screen_obj.handle(e)
+            if not self.running:
+                break
             if hasattr(self.screen_obj, "update"):
                 self.screen_obj.update(dt)
-            self.screen_obj.draw(self.screen)
-            pygame.display.flip()
+            surf = self.renderer.begin()
+            self.screen_obj.draw(surf)
+            self.renderer.present(dt)
+
         A.stop_music()
+        try:
+            self.renderer.shutdown()
+        except Exception:
+            pass
         pygame.quit()
 
 

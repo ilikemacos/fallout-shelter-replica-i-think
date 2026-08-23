@@ -3,7 +3,7 @@
 # Haven — macOS installer
 #
 # A self-contained installer. Everything needed is embedded in this one file.
-# It sets up an isolated Python environment, installs pygame, builds
+# It sets up an isolated Python environment, installs pygame + PyOpenGL, builds
 # Haven.app with PyInstaller, and installs it into ~/Applications.
 #
 # Usage:
@@ -133,7 +133,7 @@ tail -n "+${PAYLOAD_LINE}" "$0" | base64 --decode | tar -xzf - -C "$SRC_DIR" \
 
 if [ "$SOURCE_ONLY" -eq 1 ]; then
     say "Source unpacked. Run it with:"
-    echo "    cd \"${SRC_DIR}\" && python3 -m pip install pygame && python3 run.py"
+    echo "    cd \"${SRC_DIR}\" && python3 -m pip install pygame PyOpenGL && python3 run.py"
     exit 0
 fi
 
@@ -144,9 +144,10 @@ if [ ! -x "${VENV_DIR}/bin/python" ]; then
 fi
 VPY="${VENV_DIR}/bin/python"
 
-say "Installing dependencies (pygame, pyinstaller, pillow)"
+say "Installing dependencies (pygame, PyOpenGL, pyinstaller, pillow)"
 "$VPY" -m pip install --upgrade pip >/dev/null 2>&1 || true
-if ! "$VPY" -m pip install --upgrade "pygame>=2.5,<3" pyinstaller pillow; then
+if ! "$VPY" -m pip install --upgrade "pygame>=2.5,<3" PyOpenGL PyOpenGL-accelerate \
+        pyinstaller pillow; then
     die "dependency installation failed — check your network connection"
 fi
 

@@ -1,10 +1,15 @@
 # Haven
 
 An original side-view underground shelter-management game. You dig floors,
-build rooms, assign residents, keep power / water / food flowing, defend
-against intruders, send explorers into the wasteland, craft weapons and
-outfits, recover Power Armor, and grow your shelter across a large multi-
-floor grid.
+build rooms, assign residents by dragging them into place, tap rooms to
+collect what they produce, rush production for a risky bonus, keep power /
+water / food flowing, defend against raiders who breach the door and push
+room to room, send explorers into the wasteland, craft weapons and outfits,
+recover Power Armor, raise the next generation, and grow your shelter across
+a large multi-floor grid.
+
+It renders through an **OpenGL 4.1 core-profile** pipeline at up to **4K**,
+with a bloom / colour-grade / vignette post-processing chain.
 
 Haven is a personal, single-player project. It has no accounts, no ads,
 no analytics, no online services, no cloud saves, and no third-party
@@ -22,6 +27,8 @@ python3 run.py
 
 The same command line works on macOS 13+ (Apple Silicon or Intel), Windows
 10/11, and Linux.
+
+Set `HAVEN_FORCE_SDL=1` to skip OpenGL and use plain SDL2 presentation.
 
 ## Packaging native builds
 
@@ -114,21 +121,58 @@ must run the Windows script on Windows; to produce `Haven.app` you must
 run the macOS script on macOS. This repository ships both build scripts
 so a checkout on each host produces the corresponding deliverable.
 
+## Graphics
+
+Haven composes each frame into a single high-resolution surface, then streams
+it to the GPU through double-buffered pixel buffer objects and presents it
+through an OpenGL 4.1 core-profile post-processing chain:
+
+```
+scene ──► bright-pass ──► separable gaussian (ping-pong FBOs, 4 passes)
+   │                              │
+   └──────────► composite ◄───────┘
+                    │
+   bloom · contrast · saturation · warm/cool grade · vignette
+   scanlines · chromatic aberration · Bayer ordered dither
+```
+
+**Why 4.1 rather than a higher version:** macOS caps out at OpenGL 4.1 core —
+Apple froze its GL implementation there — so 4.1 is the highest version that
+is genuinely portable across macOS and Windows. Everything used here is
+4.1-clean: core-profile VAOs, FBOs, `#version 410 core` GLSL, and PBO
+streaming.
+
+Four quality presets control the chain (`low` disables bloom entirely and
+halves the work; `ultra` runs bloom at half resolution with all effects on).
+If PyOpenGL is missing or context creation fails, the game falls back to
+plain SDL2 presentation automatically and says so on the Settings screen.
+
+Measured on this project's own reference run at 1440p, the CPU-side cost of
+building a frame — simulation plus all drawing — is about **8.8 ms**, and
+about **11.9 ms** at 4K, leaving headroom inside a 16.7 ms budget for 60 FPS.
+The post-processing chain itself is ordinary GPU work (a handful of
+fullscreen passes) and is negligible on real hardware; it only becomes a
+bottleneck under a software rasteriser. 4K streams roughly 33 MB per frame to
+the GPU, so it is best on a machine with fast memory bandwidth — drop to
+1440p or lower the quality preset if frames get long.
+
 ## Playing
 
 * **WASD / arrow keys** — pan the camera
-* **Mouse wheel** — zoom
-* **Right-drag / middle-drag** — pan
-* **Left click** — select room or resident; place a ghost when Build is on
-* **Right click** — assign selected resident to a room
-* **B** — toggle Build · **R** — Residents · **I** — Inventory ·
-  **E** — Expeditions · **O** — Objectives
+* **Mouse wheel** — zoom · **right-drag / middle-drag** — pan
+* **Drag a resident onto a room** — put them to work there
+* **Click the `!` badge above a room** — collect what it has produced
+* **Left click** — select a room or resident; place a room when Build is on
+* **B** Build · **R** Residents · **I** Inventory · **E** Expeditions ·
+  **O** Objectives · **C** Collect All · **L** Lunchboxes
 * **Space** — pause · **1 / 2 / 3** — 1× / 2× / 4× speed
 * **F5** — save · **Esc** — close panel / open Menu
 
-The very first thing to try: hit **B**, choose *Power Generator*, click on
-an empty cell adjacent to your existing rooms, then open **Residents** and
-right-click a room to send someone there to work it.
+The first things to try: press **B**, pick *Power Generator*, and place it
+next to an existing room on a floor that already has a lift. Then drag a
+resident onto it from the world, wait for the `!` badge, and click it to
+bank the power. When a room is nearly finished, **Rush** it for an instant
+cycle plus bonus caps — but a failed rush starts a fire.
 
 Save files live under:
 
@@ -148,9 +192,20 @@ in-game.
 
 * 20+ room types across production, social, advanced, training, command
 * Multi-floor grid, elevators, camera pan/zoom, room selection & merging
+* **Tap-to-collect**: rooms bank their output and wait for you, with a
+  Collect All button and an optional auto-collect setting
+* **Rushing**: force an immediate production cycle for bonus caps, at a
+  rising risk of starting a fire or an infestation
+* **Raids**: attackers breach the shelter door and advance room to room,
+  scaling to how well-levelled and armed your residents actually are
+* **Growth**: two content adults sharing Living Quarters start a family;
+  children grow up and join the workforce
+* **Death and revival**: residents can be lost, and brought back for caps
+* **Lunchboxes**: four-card reward crates earned from objectives
 * Continuous resource simulation with storage caps and warnings
 * Residents with SPECIAL, XP/levelling, portraits, on-world sprites,
   pathfinding via elevators, activities (idle/walk/work/train/fight)
+* Drag-and-drop staffing plus one-click best-fit assignment by SPECIAL
 * Full construction, upgrade to level 3, destroy, merge
 * Equipment: weapons, outfits, consumables, Power Armor with
   durability and repair; visible on the resident sprite
@@ -165,20 +220,23 @@ in-game.
 * Training rooms for each SPECIAL stat
 * Objectives with progress tracking and cap rewards
 * Save / load with 3 slots, autosave, backups
-* Settings for volume, fullscreen, animations, audio toggles, slot reset
+* Settings for volume, resolution, graphics quality, fullscreen, audio
+  toggles, auto-collect and slot reset
 * Procedurally synthesized ambient music and sound effects
-* HiDPI-friendly rendering (SDL2 backing) and window resizing
+* Resolution presets from 720p to 4K, with the whole interface scaled from
+  the real screen height so it stays crisp and correctly proportioned
 
 ## Layout
 
 ```
 haven/           # game package (all cross-platform)
   main.py        # entry, main loop, screens (menu, world, settings)
+  render.py      # OpenGL 4.1 core renderer + SDL fallback
   game.py        # simulation state and tick loop
   data.py        # room/item/enemy/event tables
   assets.py      # procedural pixel-art (rooms, residents, PA, icon)
   audio.py       # procedural music and SFX
-  ui.py          # widgets, panels, HUD helpers
+  ui.py          # scale-aware widgets, panels, HUD helpers
   save.py        # JSON save/load, slots, backups
   config.py      # constants
 run.py           # cross-platform entry
