@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Build the self-contained installers.
 
-    dist/macOS/haven.sh     from scripts/installer_header.sh
-    dist/Windows/haven.ps1  from scripts/installer_header.ps1
+    dist/shelter.sh         from scripts/installer_header.sh  (macOS + Linux)
+    dist/Windows/haven.ps1  from scripts/installer_header.ps1 (Windows)
 
 Each is its header with a base64 tarball of the game source appended after
 the payload marker, so the whole game travels as one file.
 
     python3 scripts/make_installer.py            # both
-    python3 scripts/make_installer.py macos      # just one
+    python3 scripts/make_installer.py unix       # just one
 
 Runs on any platform; each produced installer runs on its own.
 """
@@ -23,8 +23,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 # name -> (header template, output path, executable bit)
 TARGETS = {
-    "macos": (ROOT / "scripts" / "installer_header.sh",
-              ROOT / "dist" / "macOS" / "haven.sh", True),
+    # One shell installer covers macOS and Linux, so it does not live under
+    # a per-OS folder.
+    "unix": (ROOT / "scripts" / "installer_header.sh",
+             ROOT / "dist" / "shelter.sh", True),
     "windows": (ROOT / "scripts" / "installer_header.ps1",
                 ROOT / "dist" / "Windows" / "haven.ps1", False),
 }

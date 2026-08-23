@@ -7,8 +7,8 @@
 # writes a `haven` launcher. Nothing is installed system-wide and no
 # administrator password is required.
 #
-#   chmod +x haven.sh
-#   ./haven.sh --run
+#   chmod +x shelter.sh
+#   ./shelter.sh --run
 #
 # Flags:
 #   (none)              install
@@ -268,7 +268,7 @@ if [ "$PLATFORM" = "macos" ]; then
     printf '    Or double-click: %s\n' "$LAUNCHER_EXTRA"
 fi
 printf '    Saves:   %s\n' "${SAVE_DIR}/saves"
-printf '    Remove:  ./haven.sh --uninstall\n'
+printf '    Remove:  ./shelter.sh --uninstall\n'
 printf '\n'
 
 if [ "$RUN_AFTER" -eq 1 ]; then

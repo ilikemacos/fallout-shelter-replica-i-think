@@ -41,12 +41,12 @@ manual build steps and the CI workflow below produce those.
 
 ### macOS / Linux — one-file installer (recommended)
 
-`dist/macOS/haven.sh` is a self-contained installer: the entire game is
+`dist/shelter.sh` is a self-contained installer: the entire game is
 embedded in that single shell script. Copy it to your machine and run:
 
 ```bash
-chmod +x haven.sh
-./haven.sh --run
+chmod +x shelter.sh
+./shelter.sh --run
 ```
 
 It finds a Python 3.10+, unpacks the source, builds an isolated virtualenv,
@@ -88,7 +88,7 @@ To regenerate the installers after changing the game:
 
 ```bash
 python3 scripts/make_installer.py           # both platforms
-python3 scripts/make_installer.py macos     # or just one
+python3 scripts/make_installer.py unix      # or just one
 ```
 
 ### Windows — one-file installer (recommended)

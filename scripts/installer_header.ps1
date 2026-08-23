@@ -85,7 +85,7 @@ if ($Uninstall) {
 
 # ---------------------------------------------------------------- platform
 if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
-    Die "This installer is for Windows. On macOS use haven.sh instead."
+    Die "This installer is for Windows. On macOS or Linux use shelter.sh instead."
 }
 
 # ---------------------------------------------------------------- python

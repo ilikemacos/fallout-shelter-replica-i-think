@@ -126,6 +126,6 @@ jobs:
             dist/macOS/Haven.app
             dist/macOS/Haven-macOS.zip
             dist/macOS/Haven.dmg
-            dist/macOS/haven.sh
+            dist/shelter.sh
           if-no-files-found: error
           retention-days: 30

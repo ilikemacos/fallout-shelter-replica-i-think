@@ -9,9 +9,7 @@ scripts/haven.icns
 # Build output is generated, with one exception per platform: the
 # self-contained installers are committed so they can be downloaded directly.
 dist/*
-!dist/macOS
-dist/macOS/*
-!dist/macOS/haven.sh
+!dist/shelter.sh
 !dist/Windows
 dist/Windows/*
 !dist/Windows/haven.ps1
