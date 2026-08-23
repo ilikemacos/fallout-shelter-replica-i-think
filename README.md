@@ -48,7 +48,49 @@ Outputs land in `dist\Windows`:
 `scripts\build_windows.bat` runs the same steps and pip-installs anything
 missing.
 
-### macOS (`Haven.app`, `Haven-macOS.zip`, optional `Haven.dmg`)
+### macOS — one-file installer (recommended)
+
+`dist/macOS/haven.sh` is a self-contained installer: the entire game is
+embedded inside that single shell script. Copy it to your Mac (for
+example into `~/Downloads`) and run:
+
+```bash
+chmod +x haven.sh
+./haven.sh --run
+```
+
+It will:
+
+1. Check you are on macOS and find a Python 3.10+ interpreter
+2. Unpack the embedded game source into
+   `~/Library/Application Support/Haven/src`
+3. Create an isolated virtualenv there and install pygame + PyInstaller
+4. Generate the app icon and build `Haven.app`
+5. Install it to `~/Applications/Haven.app`, clear the quarantine flag,
+   and write a portable `Haven-macOS.zip` alongside the installer
+
+No administrator password is required and nothing is installed
+system-wide. Other flags:
+
+| Flag | Effect |
+| --- | --- |
+| *(none)* | install only |
+| `--run` | install, then launch |
+| `--source-only` | unpack the source, skip the app build |
+| `--uninstall` | remove the app, source, and venv |
+| `--uninstall --keep-saves` | same, but keep your save files |
+
+The only prerequisite is Python 3.10 or newer. If it is missing the
+installer says so and points at python.org / Homebrew rather than
+failing obscurely.
+
+To regenerate `haven.sh` after changing the game:
+
+```bash
+python3 scripts/make_installer.py
+```
+
+### macOS — manual build
 
 On macOS 13+ (Apple Silicon recommended):
 

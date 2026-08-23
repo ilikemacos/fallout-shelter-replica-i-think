@@ -1,7 +1,10 @@
 __pycache__/
 *.pyc
 build/
-dist/
+dist/*
+!dist/macOS
+dist/macOS/*
+!dist/macOS/haven.sh
 *.spec
 .venv/
 scripts/haven.ico
