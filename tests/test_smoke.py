@@ -10,7 +10,10 @@ display is available — the renderer and every UI panel.
 
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
+import tempfile
 import sys
 import traceback
 from pathlib import Path
@@ -20,6 +23,10 @@ sys.path.insert(0, str(ROOT))
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+# Keep the suite hermetic: never touch the player's real saves or settings.
+_TMPDATA = tempfile.mkdtemp(prefix="haven-test-")
+os.environ["HAVEN_DATA_DIR"] = _TMPDATA
+atexit.register(shutil.rmtree, _TMPDATA, True)
 
 import pygame  # noqa: E402
 

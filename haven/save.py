@@ -13,7 +13,14 @@ APP_NAME = "Haven"
 
 
 def user_data_dir() -> Path:
-    """Platform-appropriate user data directory."""
+    """Platform-appropriate user data directory.
+
+    HAVEN_DATA_DIR overrides it, which keeps throwaway runs (the installer's
+    post-install check, CI, portable installs) away from real save files.
+    """
+    override = os.environ.get("HAVEN_DATA_DIR")
+    if override:
+        return Path(override)
     if os.name == "nt":
         base = os.environ.get("APPDATA") or str(Path.home() / "AppData/Roaming")
         return Path(base) / APP_NAME

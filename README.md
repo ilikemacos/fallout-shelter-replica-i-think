@@ -30,11 +30,66 @@ The same command line works on macOS 13+ (Apple Silicon or Intel), Windows
 
 Set `HAVEN_FORCE_SDL=1` to skip OpenGL and use plain SDL2 presentation.
 
-## Packaging native builds
+## Installing
 
-Both platforms build the app with PyInstaller, which produces a standalone
-binary that already contains Python and pygame. Users need no development
-tools installed.
+The quickest way to play is a one-file installer: the whole game is embedded
+in a single script that sets up an isolated environment and a launcher. It
+does not need PyInstaller and takes about half a minute.
+
+If you specifically want a native bundle (`Haven.app` / `Haven.exe`), the
+manual build steps and the CI workflow below produce those.
+
+### macOS / Linux — one-file installer (recommended)
+
+`dist/macOS/haven.sh` is a self-contained installer: the entire game is
+embedded in that single shell script. Copy it to your machine and run:
+
+```bash
+chmod +x haven.sh
+./haven.sh --run
+```
+
+It finds a Python 3.10+, unpacks the source, builds an isolated virtualenv,
+installs pygame and PyOpenGL, **verifies the install by actually running the
+game headlessly**, and writes a `haven` launcher to `~/.local/bin`. It takes
+about half a minute. Nothing is installed system-wide and no administrator
+password is required.
+
+By default it does *not* invoke PyInstaller — you get a working game, not a
+bundle. Pass `--app` if you also want a native `Haven.app`.
+
+| Flag | Effect |
+| --- | --- |
+| *(none)* | install |
+| `--run` | install, then launch |
+| `--app` | also build a native `Haven.app` with PyInstaller (slower) |
+| `--source-only` | unpack the source only, skip the environment |
+| `--uninstall` | remove Haven |
+| `--uninstall --keep-saves` | same, but keep your save files |
+| `--help` | show usage |
+
+Works on **macOS 13+ and Linux**. On macOS it also drops a double-clickable
+`~/Applications/Haven.command`; on Linux it adds a desktop menu entry.
+
+Installed layout:
+
+```
+~/.local/bin/haven                     the launcher
+<data dir>/Haven/src                   game source
+<data dir>/Haven/venv                  isolated environment
+<data dir>/Haven/saves                 your save files
+```
+
+where `<data dir>` is `~/Library/Application Support` on macOS and
+`~/.local/share` on Linux. Setting `HAVEN_DATA_DIR` overrides where saves and
+settings live, which is handy for a portable install.
+
+To regenerate the installers after changing the game:
+
+```bash
+python3 scripts/make_installer.py           # both platforms
+python3 scripts/make_installer.py macos     # or just one
+```
 
 ### Windows — one-file installer (recommended)
 
@@ -77,49 +132,6 @@ Outputs land in `dist\Windows`:
 
 `scripts\build_windows.bat` runs the same steps and pip-installs anything
 missing.
-
-### macOS — one-file installer (recommended)
-
-`dist/macOS/haven.sh` is a self-contained installer: the entire game is
-embedded inside that single shell script. Copy it to your Mac (for
-example into `~/Downloads`) and run:
-
-```bash
-chmod +x haven.sh
-./haven.sh --run
-```
-
-It will:
-
-1. Check you are on macOS and find a Python 3.10+ interpreter
-2. Unpack the embedded game source into
-   `~/Library/Application Support/Haven/src`
-3. Create an isolated virtualenv there and install pygame + PyInstaller
-4. Generate the app icon and build `Haven.app`
-5. Install it to `~/Applications/Haven.app`, clear the quarantine flag,
-   and write a portable `Haven-macOS.zip` alongside the installer
-
-No administrator password is required and nothing is installed
-system-wide. Other flags:
-
-| Flag | Effect |
-| --- | --- |
-| *(none)* | install only |
-| `--run` | install, then launch |
-| `--source-only` | unpack the source, skip the app build |
-| `--uninstall` | remove the app, source, and venv |
-| `--uninstall --keep-saves` | same, but keep your save files |
-
-The only prerequisite is Python 3.10 or newer. If it is missing the
-installer says so and points at python.org / Homebrew rather than
-failing obscurely.
-
-To regenerate the installers after changing the game:
-
-```bash
-python3 scripts/make_installer.py           # both platforms
-python3 scripts/make_installer.py macos     # or just one
-```
 
 ### macOS — manual build
 
