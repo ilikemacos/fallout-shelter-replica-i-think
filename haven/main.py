@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import sys
 import time as _time
 
@@ -1160,7 +1161,20 @@ class WorldScreen:
     def _p_residents(self, s, r):
         g = self.g
         U.panel(s, r, f"Residents  ({g.population()}/{g.housing_cap()})")
-        area = pygame.Rect(r.x + U.s(8), r.y + U.s(40), r.w - U.s(16), r.h - U.s(48))
+        # Caretaker robots patrol and collect for you.
+        bots = sum(1 for x in g.residents.values() if x.is_robot and x.alive)
+        br = pygame.Rect(r.x + U.s(8), r.y + U.s(38), r.w - U.s(16), U.s(32))
+        can_bot = (g.caps >= GM.GameState.ROBOT_COST
+                   and any(x.key == "workshop" for x in g.rooms.values()))
+        b = U.Button(br, f"Assemble Caretaker — {GM.GameState.ROBOT_COST} caps"
+                         f"{f'   ({bots} active)' if bots else ''}",
+                     None, style="primary" if can_bot else "normal",
+                     enabled=can_bot, size=14)
+        b.hover = br.collidepoint(pygame.mouse.get_pos())
+        b._anim = 1.0 if b.hover else 0.0
+        b.draw(s)
+        self._bot_btn = (br, can_bot)
+        area = pygame.Rect(r.x + U.s(8), r.y + U.s(78), r.w - U.s(16), r.h - U.s(86))
         self.scroll.rect = area
         prev = s.get_clip()
         s.set_clip(area)
@@ -1827,6 +1841,15 @@ class WorldScreen:
             return True
 
         if self.panel == "residents":
+            bb, can_bot = getattr(self, "_bot_btn", (None, False))
+            if bb and bb.collidepoint(pos):
+                if can_bot:
+                    g.buy_robot()
+                elif not any(x.key == "workshop" for x in g.rooms.values()):
+                    g.notify("A Workshop is needed to assemble a caretaker.", "bad")
+                else:
+                    g.notify(f"A caretaker costs {GM.GameState.ROBOT_COST} caps.", "bad")
+                return True
             for row, rid in getattr(self, "_res_rows", []):
                 if row.collidepoint(pos):
                     self.selected_resident = rid
@@ -2007,7 +2030,47 @@ class App:
             except Exception:
                 pass
 
+    def selftest(self, frames: int = 150) -> int:
+        """Boot, play a little, save, and exit. Used to verify packaged builds.
+
+        Enabled with HAVEN_SELFTEST=1 so a freshly built .exe or .app can
+        prove it actually starts on a clean machine with no dev runtime.
+        """
+        print(f"Haven selftest: {self.renderer.name} — {self.renderer.gl_info}")
+        if self.renderer_note:
+            print(f"  (OpenGL unavailable: {self.renderer_note})")
+        print(f"  resolution {self.size[0]}x{self.size[1]}, quality {self.quality}")
+        self.start_game(GM.GameState(seed=1234), 0)
+        world = self.screen_obj
+        for i in range(frames):
+            for _ in pygame.event.get():
+                pass
+            world.update(1 / 60)
+            surf = self.renderer.begin()
+            world.draw(surf)
+            self.renderer.present(1 / 60)
+            if i == frames // 2:
+                # Exercise the panels and a save part-way through.
+                world.panel = "residents"
+                world.selected_room = next(iter(self.game.rooms), None)
+                world.selected_resident = next(iter(self.game.residents), None)
+                S.save(self.slot, self.game.to_dict())
+        loaded = GM.GameState.from_dict(S.load(self.slot))
+        assert len(loaded.rooms) == len(self.game.rooms), "save/load mismatch"
+        print(f"  simulated {self.game.time:.0f}s, {len(self.game.rooms)} rooms, "
+              f"{self.game.population()} residents, save/load OK")
+        print("Haven selftest: PASS")
+        A.stop_music()
+        try:
+            self.renderer.shutdown()
+        except Exception:
+            pass
+        pygame.quit()
+        return 0
+
     def run(self):
+        if os.environ.get("HAVEN_SELFTEST"):
+            sys.exit(self.selftest())
         while self.running:
             dt = min(0.1, self.clock.tick(C.FPS) / 1000.0)
             for e in pygame.event.get():

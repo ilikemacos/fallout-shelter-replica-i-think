@@ -505,6 +505,62 @@ class GameState:
         self._track_objective("population", n=self.population())
         return r
 
+    ROBOT_COST = 2000
+
+    def buy_robot(self) -> Optional[Resident]:
+        """A hovering caretaker that patrols one floor collecting output."""
+        if self.caps < self.ROBOT_COST:
+            self.notify(f"A caretaker unit costs {self.ROBOT_COST} caps.", "bad")
+            return None
+        if not any(r.key == "workshop" for r in self.rooms.values()):
+            self.notify("A Workshop is needed to assemble a caretaker.", "bad")
+            return None
+        self.caps -= self.ROBOT_COST
+        n = sum(1 for r in self.residents.values() if r.is_robot) + 1
+        r = Resident(
+            id=self._next_resident_id,
+            name=f"Caretaker {n}",
+            portrait_seed=self.rng.randint(1, 10 ** 9),
+            is_robot=True,
+            stats={k: 4 for k in D.STAT_KEYS},
+        )
+        r.max_hp = 90
+        r.hp = 90
+        r.happiness = 100.0
+        r.floor = 0
+        r.x = float(self.elevator_col)
+        self._next_resident_id += 1
+        self.residents[r.id] = r
+        self.notify(f"{r.name} came online.", "good")
+        self.add_floater("ONLINE", r.floor, r.x, C.UI_BLUE)
+        A.play("upgrade")
+        return r
+
+    def _sim_robots(self, dt):
+        """Robots walk their floor and bank whatever is ready."""
+        for res in self.residents.values():
+            if not res.is_robot or not res.alive:
+                continue
+            res.idle_timer -= dt
+            if res.path:
+                continue
+            # Collect anything ready in the room it is standing in.
+            here = self.find_room(res.floor, res.x)
+            if here is not None and here.has_output():
+                self.collect_room(here.id)
+            if res.idle_timer > 0:
+                continue
+            res.idle_timer = 2.0
+            # Head for the nearest room with output, preferring its own floor.
+            targets = [r for r in self.rooms.values()
+                       if r.has_output() and r.key != "elevator"]
+            if not targets:
+                return
+            targets.sort(key=lambda r: (abs(r.floor - res.floor) * 3
+                                        + abs(r.x - res.x)))
+            self.walk_to_room(res, targets[0])
+            res.activity = "walk"
+
     def _spawn_child(self, mother: Resident):
         first = self.rng.choice(D.FIRST_NAMES)
         last = mother.name.split()[-1]
@@ -936,6 +992,7 @@ class GameState:
         self._sim_incidents(dt)
         self._sim_expeditions(dt)
         self._sim_wellbeing(dt)
+        self._sim_robots(dt)
         self._sim_lifecycle(dt)
         self._sim_random_events(dt)
         self._sim_floaters(dt)
@@ -1105,6 +1162,11 @@ class GameState:
 
         for res in self.residents.values():
             if not res.alive or res.on_expedition:
+                continue
+            if res.is_robot:
+                # Machines neither eat nor sulk.
+                res.happiness = 100.0
+                res.hp = min(res.effective_max_hp(), res.hp + 1.0 * dt)
                 continue
             d = delta
             # Working a job that suits you is satisfying.

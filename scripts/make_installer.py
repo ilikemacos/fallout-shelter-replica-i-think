@@ -1,25 +1,36 @@
 #!/usr/bin/env python3
-"""Build the self-contained macOS installer: dist/macOS/haven.sh
+"""Build the self-contained installers.
 
-The installer is scripts/installer_header.sh with a base64 tarball of the
-game source appended after the __HAVEN_PAYLOAD_BELOW__ marker.
+    dist/macOS/haven.sh     from scripts/installer_header.sh
+    dist/Windows/haven.ps1  from scripts/installer_header.ps1
 
-    python3 scripts/make_installer.py
+Each is its header with a base64 tarball of the game source appended after
+the payload marker, so the whole game travels as one file.
 
-Runs on any platform — the produced haven.sh runs on macOS.
+    python3 scripts/make_installer.py            # both
+    python3 scripts/make_installer.py macos      # just one
+
+Runs on any platform; each produced installer runs on its own.
 """
 
 from __future__ import annotations
 import base64
 import io
+import sys
 import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-HEADER = ROOT / "scripts" / "installer_header.sh"
-OUT = ROOT / "dist" / "macOS" / "haven.sh"
+# name -> (header template, output path, executable bit)
+TARGETS = {
+    "macos": (ROOT / "scripts" / "installer_header.sh",
+              ROOT / "dist" / "macOS" / "haven.sh", True),
+    "windows": (ROOT / "scripts" / "installer_header.ps1",
+                ROOT / "dist" / "Windows" / "haven.ps1", False),
+}
 
-INCLUDE = ["haven", "scripts", "run.py", "requirements.txt", "README.md", "LICENSE"]
+INCLUDE = ["haven", "scripts", "tests", "run.py", "requirements.txt",
+           "README.md", "LICENSE"]
 EXCLUDE_DIRS = {"__pycache__", ".git", "build", "dist", ".venv"}
 
 
@@ -47,25 +58,41 @@ def build_payload() -> bytes:
     return buf.getvalue()
 
 
-def main():
-    header = HEADER.read_text(encoding="utf-8")
+def write_installer(header_path: Path, out: Path, executable: bool,
+                    payload: bytes, b64_lines: str):
+    header = header_path.read_text(encoding="utf-8")
     marker = "__HAVEN_PAYLOAD_BELOW__\n"
+    # The marker may also appear where the script defines it, so anchor on
+    # the last occurrence — that is the one the payload follows.
     if marker not in header:
-        raise SystemExit("header is missing the payload marker")
-    header = header[: header.index(marker) + len(marker)]
+        raise SystemExit(f"{header_path.name} is missing the payload marker")
+    header = header[: header.rindex(marker) + len(marker)]
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8", newline="\n") as f:
+        f.write(header)
+        f.write(b64_lines)
+        f.write("\n")
+    if executable:
+        out.chmod(0o755)
+    print(f"Wrote {out}  ({out.stat().st_size / 1024:.0f} KB, "
+          f"payload {len(payload) / 1024:.0f} KB)")
+
+
+def main():
+    wanted = sys.argv[1:] or list(TARGETS)
+    unknown = [w for w in wanted if w not in TARGETS]
+    if unknown:
+        raise SystemExit(f"unknown target(s): {', '.join(unknown)}. "
+                         f"Choose from: {', '.join(TARGETS)}")
 
     payload = build_payload()
     b64 = base64.b64encode(payload).decode("ascii")
     lines = "\n".join(b64[i:i + 76] for i in range(0, len(b64), 76))
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    with OUT.open("w", encoding="utf-8", newline="\n") as f:
-        f.write(header)
-        f.write(lines)
-        f.write("\n")
-    OUT.chmod(0o755)
-    print(f"Wrote {OUT}  ({OUT.stat().st_size / 1024:.0f} KB, "
-          f"payload {len(payload) / 1024:.0f} KB)")
+    for name in wanted:
+        header_path, out, executable = TARGETS[name]
+        write_installer(header_path, out, executable, payload, lines)
 
 
 if __name__ == "__main__":

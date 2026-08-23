@@ -36,12 +36,35 @@ Both platforms build the app with PyInstaller, which produces a standalone
 binary that already contains Python and pygame. Users need no development
 tools installed.
 
-### Windows (`Haven.exe`, `Haven-Windows.zip`, optional `Haven.msi`)
+### Windows — one-file installer (recommended)
+
+`dist/Windows/haven.ps1` is a self-contained installer: the entire game is
+embedded in that single PowerShell script. Copy it to your PC and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File haven.ps1 -Run
+```
+
+It finds Python 3.10+, unpacks the source to `%LOCALAPPDATA%\Haven\src`,
+builds `Haven.exe` in an isolated venv, installs it to
+`%LOCALAPPDATA%\Haven\bin`, and adds a Start Menu shortcut. No admin rights,
+nothing machine-wide.
+
+| Flag | Effect |
+| --- | --- |
+| *(none)* | install only |
+| `-Run` | install, then launch |
+| `-Desktop` | also create a desktop shortcut |
+| `-SourceOnly` | unpack the source, skip the exe build |
+| `-Uninstall` | remove the app, source, venv and shortcuts |
+| `-Uninstall -KeepSaves` | same, but keep your save files |
+
+### Windows — manual build (`Haven.exe`, `Haven-Windows.zip`, optional `Haven.msi`)
 
 On a Windows 10/11 x64 machine:
 
 ```
-py -3 -m pip install pygame pyinstaller pillow
+py -3 -m pip install -r requirements.txt pyinstaller pillow
 py -3 scripts\build_windows.py
 ```
 
@@ -91,10 +114,11 @@ The only prerequisite is Python 3.10 or newer. If it is missing the
 installer says so and points at python.org / Homebrew rather than
 failing obscurely.
 
-To regenerate `haven.sh` after changing the game:
+To regenerate the installers after changing the game:
 
 ```bash
-python3 scripts/make_installer.py
+python3 scripts/make_installer.py           # both platforms
+python3 scripts/make_installer.py macos     # or just one
 ```
 
 ### macOS — manual build
@@ -114,12 +138,25 @@ Outputs land in `dist/macOS`:
 For distribution to other users you may want to code-sign and notarise
 the `.app`; that is outside the automated build.
 
-### Note about cross-compilation
+### Continuous builds
 
-PyInstaller cannot cross-compile. To produce a native `Haven.exe` you
-must run the Windows script on Windows; to produce `Haven.app` you must
-run the macOS script on macOS. This repository ships both build scripts
-so a checkout on each host produces the corresponding deliverable.
+PyInstaller cannot cross-compile: `Haven.exe` must be built on Windows and
+`Haven.app` on macOS. [`.github/workflows/build.yml`](.github/workflows/build.yml)
+does exactly that — it runs the test suite on Linux, Windows and macOS, then
+builds each deliverable on its own runner (`windows-latest` and `macos-14`
+for Apple Silicon) and uploads them as artifacts.
+
+Each build job then **runs the packaged binary itself** with
+`HAVEN_SELFTEST=1`, which boots the game, simulates, opens the panels, saves
+and reloads, and exits non-zero on any failure. That is what proves the
+bundle works on a machine with no development runtime installed.
+
+You can run the same check locally:
+
+```bash
+HAVEN_SELFTEST=1 python3 run.py     # boots, plays, saves, exits 0
+python3 tests/test_smoke.py         # 21 headless checks
+```
 
 ## Graphics
 
@@ -202,6 +239,8 @@ in-game.
   children grow up and join the workforce
 * **Death and revival**: residents can be lost, and brought back for caps
 * **Lunchboxes**: four-card reward crates earned from objectives
+* **Caretaker robots**: assemble one at a Workshop and it patrols the
+  shelter on its own, banking output so you do not have to
 * Continuous resource simulation with storage caps and warnings
 * Residents with SPECIAL, XP/levelling, portraits, on-world sprites,
   pathfinding via elevators, activities (idle/walk/work/train/fight)
@@ -240,6 +279,8 @@ haven/           # game package (all cross-platform)
   save.py        # JSON save/load, slots, backups
   config.py      # constants
 run.py           # cross-platform entry
+tests/
+  test_smoke.py  # 21 headless checks, run on all three platforms in CI
 scripts/        # build_windows.py, build_macos.py, batch/shell helpers
 requirements.txt
 LICENSE

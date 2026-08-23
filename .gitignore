@@ -1,10 +1,17 @@
 __pycache__/
 *.pyc
 build/
+.venv/
+*.spec
+scripts/haven.ico
+scripts/haven.icns
+
+# Build output is generated, with one exception per platform: the
+# self-contained installers are committed so they can be downloaded directly.
 dist/*
 !dist/macOS
 dist/macOS/*
 !dist/macOS/haven.sh
-*.spec
-.venv/
-scripts/haven.ico
+!dist/Windows
+dist/Windows/*
+!dist/Windows/haven.ps1
