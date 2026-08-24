@@ -1,303 +1,95 @@
-# Haven
+# Haven: Deep Shelter
 
-An original side-view underground shelter-management game. You dig floors,
-build rooms, assign residents by dragging them into place, tap rooms to
-collect what they produce, rush production for a risky bonus, keep power /
-water / food flowing, defend against raiders who breach the door and push
-room to room, send explorers into the wasteland, craft weapons and outfits,
-recover Power Armor, raise the next generation, and grow your shelter across
-a large multi-floor grid.
-
-It renders through an **OpenGL 4.1 core-profile** pipeline at up to **4K**,
-with a bloom / colour-grade / vignette post-processing chain.
-
-Haven is a personal, single-player project. It has no accounts, no ads,
-no analytics, no online services, no cloud saves, and no third-party
-copyrighted content. All artwork and audio are generated procedurally at
-runtime — nothing from any existing franchise is used.
-
-## Running from source
-
-Requires Python 3.11 or newer.
-
-```bash
-python3 -m pip install -r requirements.txt
-python3 run.py
-```
-
-The same command line works on macOS 13+ (Apple Silicon or Intel), Windows
-10/11, and Linux.
-
-Set `HAVEN_FORCE_SDL=1` to skip OpenGL and use plain SDL2 presentation.
+A polished, original 3D underground shelter-management game — a shelter
+built as a real, explorable multi-floor 3D facility, not a 2D board with a
+camera on it. Gritty, retro-futuristic, industrial-underground atmosphere;
+detailed 3D presentation and dynamic lighting. **Apple Silicon macOS only**
+(M1 and newer). All artwork, geometry and audio are original or generated
+at build/runtime — nothing is copied from any existing game.
 
 ## Installing
 
-The quickest way to play is a one-file installer: the whole game is embedded
-in a single script that sets up an isolated environment and a launcher. It
-does not need PyInstaller and takes about half a minute.
-
-If you specifically want a native bundle (`Haven.app` / `Haven.exe`), the
-manual build steps and the CI workflow below produce those.
-
-### macOS / Linux — one-file installer (recommended)
-
-`dist/shelter.sh` is a self-contained installer: the entire game is
-embedded in that single shell script. Copy it to your machine and run:
+There is exactly one installer:
 
 ```bash
-chmod +x shelter.sh
-./shelter.sh --run
+~/Downloads/users/install.sh
 ```
 
-It finds a Python 3.10+, unpacks the source, builds an isolated virtualenv,
-installs pygame and PyOpenGL, **verifies the install by actually running the
-game headlessly**, and writes a `haven` launcher to `~/.local/bin`. It takes
-about half a minute. Nothing is installed system-wide and no administrator
-password is required.
-
-By default it does *not* invoke PyInstaller — you get a working game, not a
-bundle. Pass `--app` if you also want a native `Haven.app`.
-
-| Flag | Effect |
-| --- | --- |
-| *(none)* | install |
-| `--run` | install, then launch |
-| `--app` | also build a native `Haven.app` with PyInstaller (slower) |
-| `--source-only` | unpack the source only, skip the environment |
-| `--uninstall` | remove Haven |
-| `--uninstall --keep-saves` | same, but keep your save files |
-| `--help` | show usage |
-
-Works on **macOS 13+ and Linux**. On macOS it also drops a double-clickable
-`~/Applications/Haven.command`; on Linux it adds a desktop menu entry.
-
-Installed layout:
-
-```
-~/.local/bin/haven                     the launcher
-<data dir>/Haven/src                   game source
-<data dir>/Haven/venv                  isolated environment
-<data dir>/Haven/saves                 your save files
-```
-
-where `<data dir>` is `~/Library/Application Support` on macOS and
-`~/.local/share` on Linux. Setting `HAVEN_DATA_DIR` overrides where saves and
-settings live, which is handy for a portable install.
-
-To regenerate the installers after changing the game:
+Download `dist/users/install.sh` from this repository, put it wherever you
+like (`~/Downloads/users/` is just the expected drop location — the script
+works from anywhere), and run it:
 
 ```bash
-python3 scripts/make_installer.py           # both platforms
-python3 scripts/make_installer.py unix      # or just one
+chmod +x install.sh
+./install.sh
 ```
 
-### Windows — one-file installer (recommended)
+It detects Apple Silicon and your macOS version, installs a compiler
+toolchain automatically if needed, downloads CMake if it isn't already on
+your system, builds Haven from source in Release mode, **verifies the build
+by actually running its test suite on your machine**, installs `Haven.app`
+to `/Applications`, and creates a `haven` command-line launcher. Nothing
+else is required — no Xcode, no Homebrew, no Python, no Node. Run the same
+script again any time to rebuild and update; your saves live under
+`~/Library/Application Support/Haven` and are never touched.
 
-`dist/Windows/haven.ps1` is a self-contained installer: the entire game is
-embedded in that single PowerShell script. Copy it to your PC and run:
+The installer embeds the game's full source directly in the script (as a
+compressed archive) and builds it locally, so what you get is a real,
+optimized, native arm64 build — see `scripts/make_installer.sh` if you want
+to regenerate `dist/users/install.sh` after changing the source.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File haven.ps1 -Run
-```
-
-It finds Python 3.10+, unpacks the source to `%LOCALAPPDATA%\Haven\src`,
-builds `Haven.exe` in an isolated venv, installs it to
-`%LOCALAPPDATA%\Haven\bin`, and adds a Start Menu shortcut. No admin rights,
-nothing machine-wide.
-
-| Flag | Effect |
-| --- | --- |
-| *(none)* | install only |
-| `-Run` | install, then launch |
-| `-Desktop` | also create a desktop shortcut |
-| `-SourceOnly` | unpack the source, skip the exe build |
-| `-Uninstall` | remove the app, source, venv and shortcuts |
-| `-Uninstall -KeepSaves` | same, but keep your save files |
-
-### Windows — manual build (`Haven.exe`, `Haven-Windows.zip`, optional `Haven.msi`)
-
-On a Windows 10/11 x64 machine:
-
-```
-py -3 -m pip install -r requirements.txt pyinstaller pillow
-py -3 scripts\build_windows.py
-```
-
-Outputs land in `dist\Windows`:
-
-* `Haven.exe` — one-file, double-clickable, no runtime required
-* `Haven-Windows.zip` — portable, extract and launch
-* `Haven.msi` — produced only if the WiX Toolset (`candle`, `light`) is on
-  PATH; per-user install with Start Menu shortcut and uninstall entry
-
-`scripts\build_windows.bat` runs the same steps and pip-installs anything
-missing.
-
-### macOS — manual build
-
-On macOS 13+ (Apple Silicon recommended):
-
-```
-scripts/build_macos.sh
-```
-
-Outputs land in `dist/macOS`:
-
-* `Haven.app` — normal Finder-launchable bundle (`app.haven.game`)
-* `Haven-macOS.zip` — zipped `.app`
-* `Haven.dmg` — produced with `create-dmg` if present, else `hdiutil`
-
-For distribution to other users you may want to code-sign and notarise
-the `.app`; that is outside the automated build.
-
-### Continuous builds
-
-PyInstaller cannot cross-compile: `Haven.exe` must be built on Windows and
-`Haven.app` on macOS. [`.github/workflows/build.yml`](.github/workflows/build.yml)
-does exactly that — it runs the test suite on Linux, Windows and macOS, then
-builds each deliverable on its own runner (`windows-latest` and `macos-14`
-for Apple Silicon) and uploads them as artifacts.
-
-Each build job then **runs the packaged binary itself** with
-`HAVEN_SELFTEST=1`, which boots the game, simulates, opens the panels, saves
-and reloads, and exits non-zero on any failure. That is what proves the
-bundle works on a machine with no development runtime installed.
-
-You can run the same check locally:
+## Building from source directly
 
 ```bash
-HAVEN_SELFTEST=1 python3 run.py     # boots, plays, saves, exits 0
-python3 tests/test_smoke.py         # 21 headless checks
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+./build/haven_tests        # headless simulation test suite
+open build/Haven.app       # macOS arm64 only
 ```
 
-## Graphics
+`-DHAVEN_BUILD_APP=OFF` builds just the platform-independent simulation
+core and its test suite, which also builds and runs on Linux/CI — useful
+for iterating on gameplay without a Mac.
 
-Haven composes each frame into a single high-resolution surface, then streams
-it to the GPU through double-buffered pixel buffer objects and presents it
-through an OpenGL 4.1 core-profile post-processing chain:
+## Architecture
 
-```
-scene ──► bright-pass ──► separable gaussian (ping-pong FBOs, 4 passes)
-   │                              │
-   └──────────► composite ◄───────┘
-                    │
-   bloom · contrast · saturation · warm/cool grade · vignette
-   scanlines · chromatic aberration · Bayer ordered dither
-```
+- **`src/core/`** — math, RNG, logging, profiling, the job system, settings,
+  serialization, platform paths.
+- **`src/ecs/`** — a sparse-set entity-component registry.
+- **`src/sim/`** — the shelter grid, room database, residents, items, random
+  events/emergencies, and the authoritative `World` simulation tick.
+- **`src/gameplay/`** — the tech tree, combat resolution, the procedural
+  surface map, autonomous expeditions, and the quest/objective system.
+- **`src/save/`** — crash-safe atomic saves with CRC32 corruption detection,
+  multiple slots, autosave, and backup rotation.
+- **`src/renderer/`** — the `RenderDevice`/`CommandBuffer`/`Camera`/
+  `LightingSystem` abstraction, with an OpenGL 4.1 core-profile backend
+  (`renderer/gl/`). A Vulkan/MoltenVK backend slot exists in the build
+  (`HAVEN_ENABLE_VULKAN`) for future work; until it lands, the renderer
+  honestly falls back to OpenGL rather than faking a device.
+- **`src/scene/`** — procedural mesh generation and the bridge from
+  `sim::World` to instanced 3D draws.
+- **`src/ai/`** — resident steering and activity selection.
+- **`src/ui/`** — an immediate-mode HUD with a built-in bitmap font.
+- **`src/audio/`** — procedurally synthesized sound (CoreAudio backend);
+  no licensed or third-party audio assets anywhere in the build.
+- **`src/platform/macos/`** — the Cocoa window and live system-info queries.
+- **`src/game/`** — the `App` game loop tying everything together.
+- **`tests/`** — the headless test suite (1000+ assertions) covering math,
+  the ECS, the shelter build rules, combat resolution, save round-trips,
+  expeditions, and quest progression.
 
-**Why 4.1 rather than a higher version:** macOS caps out at OpenGL 4.1 core —
-Apple froze its GL implementation there — so 4.1 is the highest version that
-is genuinely portable across macOS and Windows. Everything used here is
-4.1-clean: core-profile VAOs, FBOs, `#version 410 core` GLSL, and PBO
-streaming.
+## Status
 
-Four quality presets control the chain (`low` disables bloom entirely and
-halves the work; `ultra` runs bloom at half resolution with all effects on).
-If PyOpenGL is missing or context creation fails, the game falls back to
-plain SDL2 presentation automatically and says so on the Settings screen.
-
-Measured on this project's own reference run at 1440p, the CPU-side cost of
-building a frame — simulation plus all drawing — is about **8.8 ms**, and
-about **11.9 ms** at 4K, leaving headroom inside a 16.7 ms budget for 60 FPS.
-The post-processing chain itself is ordinary GPU work (a handful of
-fullscreen passes) and is negligible on real hardware; it only becomes a
-bottleneck under a software rasteriser. 4K streams roughly 33 MB per frame to
-the GPU, so it is best on a machine with fast memory bandwidth — drop to
-1440p or lower the quality preset if frames get long.
-
-## Playing
-
-* **WASD / arrow keys** — pan the camera
-* **Mouse wheel** — zoom · **right-drag / middle-drag** — pan
-* **Drag a resident onto a room** — put them to work there
-* **Click the `!` badge above a room** — collect what it has produced
-* **Left click** — select a room or resident; place a room when Build is on
-* **B** Build · **R** Residents · **I** Inventory · **E** Expeditions ·
-  **O** Objectives · **C** Collect All · **L** Lunchboxes
-* **Space** — pause · **1 / 2 / 3** — 1× / 2× / 4× speed
-* **F5** — save · **Esc** — close panel / open Menu
-
-The first things to try: press **B**, pick *Power Generator*, and place it
-next to an existing room on a floor that already has a lift. Then drag a
-resident onto it from the world, wait for the `!` badge, and click it to
-bank the power. When a room is nearly finished, **Rush** it for an instant
-cycle plus bonus caps — but a failed rush starts a fire.
-
-Save files live under:
-
-* Windows — `%APPDATA%\Haven\`
-* macOS — `~/Library/Application Support/Haven/`
-* Linux — `$XDG_DATA_HOME/Haven/` (or `~/.local/share/Haven/`)
-
-Three save slots, autosave every 60 s, five rolling backups per slot,
-graceful recovery on corrupt files.
-
-## What's implemented
-
-Simulation is data-driven — all rooms, weapons, outfits, power armor,
-enemies, exploration events, incidents, and objectives live in
-[`haven/data.py`](haven/data.py). Add rows and they immediately appear
-in-game.
-
-* 20+ room types across production, social, advanced, training, command
-* Multi-floor grid, elevators, camera pan/zoom, room selection & merging
-* **Tap-to-collect**: rooms bank their output and wait for you, with a
-  Collect All button and an optional auto-collect setting
-* **Rushing**: force an immediate production cycle for bonus caps, at a
-  rising risk of starting a fire or an infestation
-* **Raids**: attackers breach the shelter door and advance room to room,
-  scaling to how well-levelled and armed your residents actually are
-* **Growth**: two content adults sharing Living Quarters start a family;
-  children grow up and join the workforce
-* **Death and revival**: residents can be lost, and brought back for caps
-* **Lunchboxes**: four-card reward crates earned from objectives
-* **Caretaker robots**: assemble one at a Workshop and it patrols the
-  shelter on its own, banking output so you do not have to
-* Continuous resource simulation with storage caps and warnings
-* Residents with SPECIAL, XP/levelling, portraits, on-world sprites,
-  pathfinding via elevators, activities (idle/walk/work/train/fight)
-* Drag-and-drop staffing plus one-click best-fit assignment by SPECIAL
-* Full construction, upgrade to level 3, destroy, merge
-* Equipment: weapons, outfits, consumables, Power Armor with
-  durability and repair; visible on the resident sprite
-* Five original Power Armor variants (Heavy Industrial, Scout Rig,
-  Guardian Mk II, Experimental X-01, Havenite Vanguard) with unique
-  bonuses, rarity, and visual design
-* Random incidents (fires, invaders, infestations, equipment failures)
-  with real-time combat and defenders auto-dispatched
-* Expeditions: send a resident with duration/gear, roll data-driven
-  events, return with caps / resources / items / rare Power Armor
-* Crafting from materials + caps with room-gated rarity tiers
-* Training rooms for each SPECIAL stat
-* Objectives with progress tracking and cap rewards
-* Save / load with 3 slots, autosave, backups
-* Settings for volume, resolution, graphics quality, fullscreen, audio
-  toggles, auto-collect and slot reset
-* Procedurally synthesized ambient music and sound effects
-* Resolution presets from 720p to 4K, with the whole interface scaled from
-  the real screen height so it stays crisp and correctly proportioned
-
-## Layout
-
-```
-haven/           # game package (all cross-platform)
-  main.py        # entry, main loop, screens (menu, world, settings)
-  render.py      # OpenGL 4.1 core renderer + SDL fallback
-  game.py        # simulation state and tick loop
-  data.py        # room/item/enemy/event tables
-  assets.py      # procedural pixel-art (rooms, residents, PA, icon)
-  audio.py       # procedural music and SFX
-  ui.py          # scale-aware widgets, panels, HUD helpers
-  save.py        # JSON save/load, slots, backups
-  config.py      # constants
-run.py           # cross-platform entry
-tests/
-  test_smoke.py  # 21 headless checks, run on all three platforms in CI
-scripts/        # build_windows.py, build_macos.py, batch/shell helpers
-requirements.txt
-LICENSE
-```
+The simulation core, renderer abstraction, OpenGL backend, scene layer, and
+save system are built and unit-tested (`cmake --build && ./build/haven_tests`
+passes, including a full round-trip test of the exact source embedded in
+`dist/users/install.sh`). The macOS-specific window/audio/UI/app layer is
+Cocoa/OpenGL/AudioToolbox code that cannot be compiled or run outside a real
+macOS + Xcode toolchain, so it has not been build-verified in this
+environment — run the installer on Apple Silicon hardware to build and play
+it, and report back anything that fails to build so it can be fixed.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see `LICENSE`.
