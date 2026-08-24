@@ -1,7 +1,0 @@
-pygame>=2.5,<3
-
-# Optional but recommended: enables the OpenGL 4.1 core renderer with its
-# bloom / grade / vignette post-processing chain. Without these the game
-# still runs, falling back to plain SDL2 presentation.
-PyOpenGL>=3.1.6
-PyOpenGL-accelerate>=3.1.6
