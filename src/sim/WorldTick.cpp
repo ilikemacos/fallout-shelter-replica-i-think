@@ -123,7 +123,7 @@ void World::tickProduction(f32 dt) {
         f32 staff = 0.0f;
         for (ResidentId w : r.workers)
             if (const Resident* res = resident(w))
-                if (res->available() && res->currentRoom == r.id) staff += res->workEfficiency(d.primarySkill);
+                if (res->available() && res->assignedRoom == r.id) staff += res->workEfficiency(d.primarySkill);
         if (r.workers.empty()) staff = 0.0f;
         const f32 crewFactor = r.workerSlots() > 0
             ? saturate(staff / static_cast<f32>(r.workerSlots())) : 0.0f;
@@ -174,7 +174,7 @@ void World::tickProduction(f32 dt) {
         for (ResidentId w : r.workers) {
             Resident* res = resident(w);
             if (!res || !res->available()) continue;
-            if (res->currentRoom != r.id) continue;
+            if (res->assignedRoom != r.id) continue;
             staff += res->workEfficiency(d.primarySkill);
             ++present;
         }
@@ -209,7 +209,7 @@ void World::tickProduction(f32 dt) {
             }
             for (ResidentId w : r.workers)
                 if (Resident* res = resident(w))
-                    if (res->currentRoom == r.id) {
+                    if (res->assignedRoom == r.id) {
                         res->grantExperience(dt * 0.35f);
                         res->totalWorkedHours += dt * kGameHoursPerSecond;
                     }
@@ -219,7 +219,7 @@ void World::tickProduction(f32 dt) {
             const f32 rate = dt * (1.0f + bonus.trainingSpeed);
             for (ResidentId w : r.workers) {
                 Resident* res = resident(w);
-                if (!res || res->currentRoom != r.id) continue;
+                if (!res || res->assignedRoom != r.id) continue;
                 const Skill s = trainingSkill(w);
                 const u8 cur = res->skills.get(s);
                 if (cur >= 10) continue;
@@ -237,8 +237,11 @@ void World::tickProduction(f32 dt) {
         }
 
         if (d.function == RoomFunction::Heal) {
+            // The infirmary tends anyone hurt in the shelter, not only those
+            // physically standing in it — the physical walk-in is a
+            // presentation detail, not a gate on care.
             for (Resident& res : residents_) {
-                if (res.currentRoom != r.id || !res.alive()) continue;
+                if (!res.alive() || res.expeditionId != 0) continue;
                 if (res.health >= res.effectiveMaxHealth() && res.radiation <= 0.0f) continue;
                 const f32 medicineWanted = dt * 0.02f;
                 if (resources_.spend(Resource::Medicine, medicineWanted)) {

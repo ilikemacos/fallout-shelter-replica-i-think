@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <sys/stat.h>
 
 namespace hv::save {
 namespace {
@@ -12,8 +13,7 @@ namespace {
 // File layout: [4] magic "HVSV" [4] u32 payloadCrc [8] u64 payloadSize [N] payload
 constexpr char kMagic[4] = {'H', 'V', 'S', 'V'};
 
-std::string timestampNow() {
-    std::time_t t = std::time(nullptr);
+std::string formatTimestamp(std::time_t t) {
     std::tm tmv{};
 #if defined(_WIN32)
     localtime_s(&tmv, &t);
@@ -139,6 +139,8 @@ SlotInfo SaveManager::describeSlot(int slot) const {
     const std::string path = pathFor(slot);
     if (!hv::paths::fileExists(path)) return info;
     info.exists = true;
+    struct stat st{};
+    info.timestamp = ::stat(path.c_str(), &st) == 0 ? formatTimestamp(st.st_mtime) : std::string();
 
     bool corrupted = false;
     auto payload = readVerified(path, &corrupted);

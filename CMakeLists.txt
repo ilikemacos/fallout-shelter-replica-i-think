@@ -19,7 +19,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(HAVEN_BUILD_APP     "Build the windowed game (requires macOS arm64)" ON)
 option(HAVEN_BUILD_TESTS   "Build the headless simulation test-suite"       ON)
-option(HAVEN_ENABLE_VULKAN "Build the Vulkan/MoltenVK backend when possible" ON)
+option(HAVEN_ENABLE_VULKAN "Build the Vulkan/MoltenVK backend when possible" OFF)
 set(HAVEN_VULKAN_HEADERS   "" CACHE PATH "Directory containing vulkan/vulkan.h")
 set(HAVEN_GLSLANG          "" CACHE FILEPATH "glslangValidator used to bake SPIR-V")
 
@@ -154,12 +154,24 @@ if(HAVEN_BUILD_APP)
     "${CMAKE_SOURCE_DIR}/src/platform/macos/CocoaWindow.mm"
     "${CMAKE_SOURCE_DIR}/src/platform/macos/MacSystemInfo.mm"
     "${CMAKE_SOURCE_DIR}/src/audio/CoreAudioBackend.mm"
-    "${CMAKE_SOURCE_DIR}/src/assets/FontBakerApple.mm"
+    "${CMAKE_SOURCE_DIR}/src/game/main.mm"
   )
+  list(REMOVE_DUPLICATES HAVEN_APP_SRC)
   if(HAVEN_HAVE_VULKAN)
+    # The Vulkan/MoltenVK backend (src/renderer/vk/) is not yet implemented —
+    # detection and SPIR-V baking are wired up above for when it lands, but
+    # until then the app always falls back to the OpenGL 4.1 backend, which
+    # RenderDeviceFactory.cpp does automatically and honestly (it never
+    # fakes a Vulkan device). Guard against a stale cache value claiming
+    # Vulkan is available with no backend sources to prove it.
     file(GLOB HAVEN_VK_SRC CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/renderer/vk/*.cpp")
-    list(APPEND HAVEN_APP_SRC ${HAVEN_VK_SRC}
-         "${CMAKE_SOURCE_DIR}/src/renderer/vk/VulkanSurface.mm")
+    if(NOT HAVEN_VK_SRC)
+      message(STATUS "Haven: Vulkan headers found but the backend source (src/renderer/vk/) "
+                      "doesn't exist yet — building OpenGL-only")
+      set(HAVEN_HAVE_VULKAN OFF)
+    else()
+      list(APPEND HAVEN_APP_SRC ${HAVEN_VK_SRC})
+    endif()
   endif()
 
   add_executable(Haven MACOSX_BUNDLE ${HAVEN_APP_SRC})
