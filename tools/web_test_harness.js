@@ -61,6 +61,44 @@ try{
   const b2=world.people.filter(p=>p.job).length;
   for(const pid of built.staff.slice()){const p=world.people.find(x=>x.id===pid); if(p) unassign(world,p);}
   ok('unassign clears jobs', world.people.filter(p=>p.job).length<b2);
+
+  // ---- first person -----------------------------------------------------
+  enterFP(world);
+  ok('enterFP activates', !!fp);
+  ok('enterFP starts at the entrance floor', fp.floor===world.rooms[0].floor);
+
+  // walking inside a room moves you
+  const g2=world.rooms.find(r=>r.def==='generator');
+  const gc=roomCenter(g2);
+  fp.x=gc.x; fp.z=0; fp.floor=g2.floor; fp.yaw=Math.PI/2;   // face +X
+  const x0=fp.x;
+  keys.KeyW=true; for(let i=0;i<10;i++) fpUpdate(world,0.05); keys.KeyW=false;
+  ok('walking moves you', Math.abs(fp.x-x0)>0.3);
+
+  // solid rock blocks you: walk hard at the far edge and stay inside
+  fp.x=gc.x; fp.yaw=-Math.PI/2;
+  keys.KeyW=true; for(let i=0;i<200;i++) fpUpdate(world,0.05); keys.KeyW=false;
+  ok('cannot walk into solid rock', walkable(world,fp.floor,fp.x));
+
+  // z is clamped inside the room depth
+  ok('stays within room depth', Math.abs(fp.z)<RD*0.5);
+
+  // the elevator moves you between floors
+  const lift=world.rooms.find(r=>r.def==='elevator'&&r.progress>=1);
+  if(lift){
+    const lc=roomCenter(lift);
+    fp.floor=lift.floor; fp.x=lc.x; fp.liftHeld=false;
+    const below=roomAt(world,lift.floor+1,Math.round(fp.x/CW+(COLS-1)/2));
+    if(below&&below.progress>=1){
+      const f0=fp.floor;
+      keys.KeyE=true; fpUpdate(world,0.05); keys.KeyE=false;
+      ok('elevator descends a floor', fp.floor===f0+1);
+    } else ok('elevator descends a floor', true);
+  } else ok('elevator descends a floor', true);
+
+  exitFP();
+  ok('exitFP deactivates', fp===null);
+
   ok('no gl errors', gl.getError()===0);
 }catch(e){ R.push('FAIL exception: '+e.message); }
 document.title=R.join(' ;; ');

@@ -85,6 +85,16 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:
 #mode b{color:var(--amber-b)}
 #toast{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:10px 20px;
   font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;color:var(--crit)}
+/* first-person crosshair */
+#cross{position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;
+  display:none;pointer-events:none}
+#cross:before,#cross:after{content:'';position:absolute;background:rgba(231,223,201,.75);
+  box-shadow:0 0 3px rgba(0,0,0,.9)}
+#cross:before{left:7px;top:0;width:2px;height:16px}
+#cross:after{top:7px;left:0;height:2px;width:16px}
+#fpinfo{position:absolute;left:50%;bottom:52px;transform:translateX(-50%);padding:7px 14px;
+  font-size:11.5px;display:none;white-space:nowrap;text-align:center}
+#fpinfo b{color:var(--amber-b)}
 
 /* start / help overlay */
 #ov{position:fixed;inset:0;background:rgba(8,9,11,.93);display:flex;align-items:center;
@@ -116,6 +126,8 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:
   <div id="log" class="pnl"><h3>Log</h3><div id="notes"></div></div>
   <div id="mode" class="pnl"></div>
   <div id="toast" class="pnl"></div>
+  <div id="cross"></div>
+  <div id="fpinfo" class="pnl"></div>
   <div id="hint">
     <span><b>LMB</b> select/place</span>
     <span><b>RMB/2-finger</b> orbit</span>
@@ -137,6 +149,7 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:
     <b>RMB / drag</b><span>Orbit the camera</span>
     <b>Wheel</b><span>Zoom in close</span>
     <b>WASD</b><span>Pan across the shelter</span>
+    <b>Tab</b><span>Walk the shelter in first person</span>
   </div>
   <button id="play">Enter the shelter</button>
   <button id="cont" class="alt" style="display:none">Continue saved shelter</button>
@@ -407,9 +420,9 @@ void main(){
     albedo=mix(vec3(0.44,0.43,0.40)*(0.8+0.4*fbm(P*25.0,2)), br, b.x);
     rough=mix(0.95,0.82,b.x); ao=mix(0.55,1.0,b.x);
   } else if(kind==2){                            // rusted metal
-    float ox=smoothstep(0.25,0.75, fbm(P*2.4,4)*0.5+0.5);
-    float pit=smoothstep(0.28,0.0, worley(P*20.0).x);
-    albedo=mix(vec3(0.38,0.39,0.42), tint*vec3(1.15,0.62,0.32), clamp(ox+pit*0.5,0.0,1.0));
+    float ox=smoothstep(0.30,0.72, fbm(P*6.5,4)*0.5+0.5);
+    float pit=smoothstep(0.24,0.0, worley(P*26.0).x);
+    albedo=mix(vec3(0.38,0.39,0.42), tint*vec3(1.02,0.68,0.46), clamp(ox+pit*0.45,0.0,1.0));
     albedo*=0.75+0.5*h; metal=mix(0.85,0.08,ox); rough=mix(0.38,0.95,ox); ao=1.0-pit*0.4;
   } else if(kind==3){                            // painted metal, chipping
     vec2 b=bond(triCoords(P,Ng),vec2(1.6,1.1),0.03);
@@ -1061,6 +1074,90 @@ function pickCell(px,py){
   }
   return best;
 }
+// ---- first person ---------------------------------------------------------
+// A cell is walkable when a finished room covers it. Rooms are open to each
+// other sideways, so walking off the end of one into the next just works.
+function walkable(w,floor,x){
+  const col=Math.round(x/CW+(COLS-1)/2);
+  const r=roomAt(w,floor,col);
+  return !!(r && r.progress>=1);
+}
+function enterFP(w){
+  // Drop in at the entrance, facing along the shelter.
+  const e=w.rooms[0], c=roomCenter(e);
+  fp={x:c.x, y:c.y, z:0, yaw:0, pitch:0, floor:e.floor, bob:0, t:0};
+  document.getElementById('cross').style.display='block';
+  document.getElementById('fpinfo').style.display='block';
+  document.getElementById('build').style.display='none';
+  document.getElementById('insp').style.display='none';
+  buildMode=null; selRoom=null; updateMode();
+  canvas.requestPointerLock && canvas.requestPointerLock();
+}
+function exitFP(){
+  fp=null;
+  document.getElementById('cross').style.display='none';
+  document.getElementById('fpinfo').style.display='none';
+  document.getElementById('build').style.display='';
+  if(document.pointerLockElement) document.exitPointerLock();
+  uiInspDirty=true;
+}
+function fpUpdate(w,dt){
+  fp.t+=dt;
+  const sprint=keys.ShiftLeft||keys.ShiftRight;
+  const spd=(sprint?RUN:WALK);
+  let fwd=0,strafe=0;
+  if(keys.KeyW||keys.ArrowUp) fwd+=1;
+  if(keys.KeyS||keys.ArrowDown) fwd-=1;
+  if(keys.KeyD||keys.ArrowRight) strafe+=1;
+  if(keys.KeyA||keys.ArrowLeft) strafe-=1;
+  const l=Math.hypot(fwd,strafe);
+  if(l>0){
+    fwd/=l; strafe/=l;
+    const sy=Math.sin(fp.yaw), cy=Math.cos(fp.yaw);
+    // -Z is forward at yaw 0, matching the camera basis below
+    const dx=(-sy*fwd + cy*strafe)*spd*dt;
+    const dz=(-cy*fwd - sy*strafe)*spd*dt;
+    // axis-separated so you slide along a wall instead of sticking
+    if(walkable(w,fp.floor, fp.x+dx+Math.sign(dx)*0.35)) fp.x+=dx;
+    const nz=fp.z+dz, lim=RD*0.5-0.7;
+    if(nz>-lim && nz<lim) fp.z=nz;
+    fp.bob+=Math.hypot(dx,dz)*(sprint?5.5:4.2);
+  }
+  fp.y=-fp.floor*FH;
+
+  // elevator: E goes down, Q goes up, when a floor exists to travel to
+  const col=Math.round(fp.x/CW+(COLS-1)/2);
+  const here=roomAt(w,fp.floor,col);
+  const inLift = here && here.def==='elevator' && here.progress>=1;
+  const below = roomAt(w,fp.floor+1,col), above = roomAt(w,fp.floor-1,col);
+  let prompt='<b>WASD</b> walk · <b>Shift</b> run · <b>Mouse</b> look · <b>Tab</b> overview';
+  if(inLift){
+    const canDown = below && below.progress>=1, canUp = above && above.progress>=1;
+    if(canDown||canUp){
+      prompt='';
+      if(canDown) prompt+='<b>E</b> down a floor';
+      if(canUp) prompt+=(prompt?' · ':'')+'<b>Q</b> up a floor';
+      prompt+=' · <b>Tab</b> overview';
+    }
+    if(canDown && keys.KeyE && !fp.liftHeld){ fp.floor++; fp.liftHeld=true; }
+    else if(canUp && keys.KeyQ && !fp.liftHeld){ fp.floor--; fp.liftHeld=true; }
+  }
+  if(!keys.KeyE && !keys.KeyQ) fp.liftHeld=false;
+  const info=document.getElementById('fpinfo');
+  const label = here? roomDef(here.def).name : 'Solid rock';
+  info.innerHTML='<span style="color:var(--amber)">'+label+'</span> &nbsp;·&nbsp; Level '+
+    (fp.floor+1)+' &nbsp;·&nbsp; '+prompt;
+
+  // head bob, and a camera basis built straight from yaw/pitch
+  const bob=Math.sin(fp.bob)*0.045;
+  const eye=V3(fp.x, fp.y+EYE+bob, fp.z);
+  const cp=Math.cos(fp.pitch), sp=Math.sin(fp.pitch);
+  const dir=V3(-Math.sin(fp.yaw)*cp, sp, -Math.cos(fp.yaw)*cp);
+  cam.eye=eye;
+  cam.view=mLookAt(eye, V3(eye.x+dir.x, eye.y+dir.y, eye.z+dir.z), V3(0,1,0));
+  cam.proj=mPersp(72*Math.PI/180, canvas.width/Math.max(1,canvas.height), 0.06, 400);
+}
+
 const stats={draws:0,tris:0};
 </script>
 <script>
@@ -1155,6 +1252,15 @@ function render(w,dt){
     const c=roomCenter(r), wdt=r.w*CW;
     push(mMul(mTrans(c.x,c.y,0), mScale(wdt,FH*0.92,RD)), WHITE);
   }
+  // In first person the room has to be closed on the near side too, or you
+  // are standing in an open-fronted diorama. In the overview it stays open
+  // so you can see in.
+  if(fp){
+    for(const r of w.rooms){
+      const c=roomCenter(r), wdt=r.w*CW;
+      push(mMul(mMul(mTrans(c.x,c.y,0), mRotY(Math.PI)), mScale(wdt,FH*0.92,RD)), WHITE);
+    }
+  }
   flush(MESH.wall,SK.CONCRETE,hexLin(0x55524C),0.02,0.95);
 
   // pillars at each room edge + a lintel across the top: this is what makes
@@ -1231,6 +1337,9 @@ function render(w,dt){
 "use strict";
 // ---- state ----------------------------------------------------------------
 let world=null, buildMode=null, hoverCell=null, selRoom=null, quality=1, running=false;
+// First-person mode: walk the shelter from inside, Fallout-style.
+let fp=null;   // null = overview camera; otherwise {x,y,z,yaw,pitch,floor,bob}
+const EYE=1.66, WALK=3.6, RUN=6.2;
 let uiTopDirty=true, uiNotesDirty=true, uiInspDirty=true;
 const SAVE_KEY='haven.save.v1';
 
@@ -1276,6 +1385,7 @@ function updateTop(){
       '<div id="clock"><span id="pop"></span><b id="tday"></b>'+
       '<button class="tbtn" id="bspeed">1x</button>'+
       '<button class="tbtn" id="bstaff">Staff</button>'+
+      '<button class="tbtn" id="bfp">Walk in</button>'+
       '<button class="tbtn" id="bq">RT</button></div>';
     host.dataset.init='1';
     $('bspeed').onclick=()=>{
@@ -1293,6 +1403,7 @@ function updateTop(){
       $('bq').textContent=['RT off','RT light','RT low'][quality];
       $('bq').className='tbtn'+(quality?' on':'');
     };
+    $('bfp').onclick=()=>{ if(fp) exitFP(); else enterFP(world); };
     $('bq').textContent='RT light'; $('bq').className='tbtn on';
   }
   for(let i=0;i<6;i++){
@@ -1384,18 +1495,48 @@ function updateInsp(){
 const keys={};
 addEventListener('keydown',e=>{
   keys[e.code]=true;
-  if(e.code==='Escape'){ buildMode=null; selRoom=null; buildPalette(); updateMode(); uiInspDirty=true; }
+  if(e.code==='Tab'){
+    e.preventDefault();
+    if(!running) return;
+    if(fp) exitFP(); else enterFP(world);
+    return;
+  }
+  if(e.code==='Escape'){
+    if(fp){ exitFP(); return; }
+    buildMode=null; selRoom=null; buildPalette(); updateMode(); uiInspDirty=true;
+  }
   if(e.code==='Space'){ e.preventDefault(); world.paused=!world.paused;
     $('bspeed').textContent=world.paused?'||':world.speed+'x'; }
 });
 addEventListener('keyup',e=>{ keys[e.code]=false; });
 
+// Mouse look. Pointer lock gives raw deltas, so the view keeps turning
+// past the edge of the window the way a first-person game should.
+addEventListener('mousemove',e=>{
+  if(!fp || document.pointerLockElement!==canvas) return;
+  fp.yaw   -= e.movementX*0.0022;
+  fp.pitch  = clamp(fp.pitch - e.movementY*0.0022, -1.45, 1.45);
+});
+document.addEventListener('pointerlockchange',()=>{
+  // Losing the lock (Esc, alt-tab) should not silently leave you stuck
+  // looking straight ahead with no way to turn.
+  if(fp && document.pointerLockElement!==canvas){
+    const i=document.getElementById('fpinfo');
+    if(i) i.innerHTML='<b>Click</b> to look around &nbsp;·&nbsp; <b>Tab</b> overview';
+  }
+});
+
 let drag=null;
 canvas.addEventListener('pointerdown',e=>{
+  if(fp){
+    if(document.pointerLockElement!==canvas) canvas.requestPointerLock&&canvas.requestPointerLock();
+    return;
+  }
   canvas.setPointerCapture(e.pointerId);
   drag={x:e.clientX,y:e.clientY,btn:e.button,moved:0};
 });
 canvas.addEventListener('pointermove',e=>{
+  if(fp) return;
   const r=canvas.getBoundingClientRect();
   hoverCell=pickCell(e.clientX-r.left, e.clientY-r.top);
   if(!drag) return;
@@ -1408,6 +1549,7 @@ canvas.addEventListener('pointermove',e=>{
   drag.x=e.clientX; drag.y=e.clientY;
 });
 canvas.addEventListener('pointerup',e=>{
+  if(fp){ drag=null; return; }
   const wasDrag = drag && drag.moved>6;
   const btn = drag? drag.btn : 0;
   drag=null;
@@ -1434,6 +1576,7 @@ canvas.addEventListener('pointerup',e=>{
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 canvas.addEventListener('wheel',e=>{
   e.preventDefault();
+  if(fp) return;
   cam.tdist=clamp(cam.tdist + Math.sign(e.deltaY)*cam.tdist*0.12, 5, 70);
 },{passive:false});
 // pinch zoom
@@ -1488,18 +1631,19 @@ function frame(t){
   last=now;
   if(!running) return;
 
-  // keyboard pan
-  let px=0,py=0;
-  if(keys.KeyW||keys.ArrowUp) py-=1;
-  if(keys.KeyS||keys.ArrowDown) py+=1;
-  if(keys.KeyA||keys.ArrowLeft) px-=1;
-  if(keys.KeyD||keys.ArrowRight) px+=1;
-  if(px||py) camPan(px*520*dt, py*520*dt);
-  if(keys.KeyQ) cam.tyaw-=dt*1.2;
-  if(keys.KeyE) cam.tyaw+=dt*1.2;
+  if(!fp){
+    let px=0,py=0;
+    if(keys.KeyW||keys.ArrowUp) py-=1;
+    if(keys.KeyS||keys.ArrowDown) py+=1;
+    if(keys.KeyA||keys.ArrowLeft) px-=1;
+    if(keys.KeyD||keys.ArrowRight) px+=1;
+    if(px||py) camPan(px*520*dt, py*520*dt);
+    if(keys.KeyQ) cam.tyaw-=dt*1.2;
+    if(keys.KeyE) cam.tyaw+=dt*1.2;
+  }
 
   tick(world,dt);
-  camUpdate(dt);
+  if(fp) fpUpdate(world,dt); else camUpdate(dt);
   render(world,dt);
 
   if(toastT>0){ toastT-=dt; if(toastT<=0) $('toast').style.opacity='0'; }

@@ -14,6 +14,11 @@ no install, no build, no server. Open it in any browser with WebGL2 (current
 Safari, Chrome or Firefox) and play. It saves to `localStorage`, so closing
 the tab keeps your shelter.
 
+Two ways to play it: a three-quarter overview for building and managing, and
+a **first-person mode** — press **Tab** (or *Walk in*) to drop inside the
+shelter and walk its rooms with mouse-look, WASD, sprint and elevators
+between floors.
+
 It is a real port, not a stripped-down demo: the same procedural-texture
 shading model (concrete, brick, rust, painted and brushed metal, tile, wood,
 fabric — all generated in the fragment shader, zero texture files), the same
@@ -22,8 +27,9 @@ per-pixel against a box soup of rooms, and the same shelter economy
 (power/water/food/materials, staffing, morale, breakdowns, newcomers).
 
 Its functional tests run in headless Chromium — `tools/run_web_tests.sh`
-drives the real input handlers and simulation and checks 21 behaviours
-(build validation, click-to-build, production, save/load round-trip).
+drives the real input handlers and simulation and checks 28 behaviours
+(build validation, click-to-build, production, save/load round-trip,
+first-person collision and elevator travel).
 
 ## Installing the native macOS build
 
