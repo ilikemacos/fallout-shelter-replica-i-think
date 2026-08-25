@@ -7,7 +7,7 @@
 #  own Apple Silicon Mac, so the result is a real, native, optimized build —
 #  not a generic download. Just run:
 #
-#      ~/Downloads/ty.sh
+#      ~/Downloads/uio.sh
 #
 #  It will detect your Mac, fetch a build toolchain if you don't already
 #  have one, compile Haven in Release mode, verify the build by actually
@@ -118,7 +118,7 @@ ensure_compiler() {
   info "A window titled 'Install Command Line Tools' should appear."
   info "Click Install there, accept the license, and let it finish, then re-run this script."
   xcode-select --install 2>/dev/null || true
-  fail "Waiting on Xcode Command Line Tools. Run ~/Downloads/ty.sh again once that install finishes."
+  fail "Waiting on Xcode Command Line Tools. Run ~/Downloads/uio.sh again once that install finishes."
 }
 
 # -----------------------------------------------------------------------------
