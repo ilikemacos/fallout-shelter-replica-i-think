@@ -5,115 +5,167 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Haven: Deep Shelter</title>
 <style>
+/* Vault-Tec styling: steel-blue panels, gold accents, segmented meters. */
 :root{
-  --bg:#0d0e10; --panel:rgba(24,26,30,.93); --panel2:rgba(32,35,40,.95);
-  --line:#3a3f47; --text:#e7dfc9; --dim:#8b8272;
-  --amber:#e09d3b; --amber-b:#ffc45c; --good:#5fae5f; --warn:#e8a83f; --crit:#d64646;
+  --bg:#0b1116; --steel:#1b2b33; --steel2:#243a44; --steel3:#2e4a56;
+  --line:#3e5c68; --line2:#54808f;
+  --gold:#ffc94a; --gold2:#d99b1f; --goldink:#2a1f05;
+  --text:#d7e6ec; --dim:#7e9aa6;
+  --green:#6fd07a; --amber:#ffb03a; --red:#e8624a;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
-  font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;user-select:none}
+  font:13px/1.5 "Trebuchet MS",Verdana,Geneva,sans-serif;user-select:none}
 canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
 #ui{position:fixed;inset:0;pointer-events:none}
 #ui>*{pointer-events:auto}
-.pnl{background:var(--panel);border:1px solid var(--line);border-radius:5px;
-  backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
+.pnl{background:linear-gradient(180deg,var(--steel2),var(--steel));
+  border:2px solid var(--line);border-radius:8px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.10), 0 4px 16px rgba(0,0,0,.55)}
+.hdr{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--goldink);
+  background:linear-gradient(180deg,var(--gold),var(--gold2));
+  margin:-1px -1px 9px;padding:5px 11px;border-radius:5px 5px 0 0;font-weight:bold}
 
-/* top resource bar */
-#top{position:absolute;top:0;left:0;right:0;height:44px;display:flex;align-items:center;
-  gap:4px;padding:0 12px;background:linear-gradient(180deg,rgba(16,17,20,.97),rgba(16,17,20,.82));
-  border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+/* top HUD */
+#top{position:absolute;top:0;left:0;right:0;height:60px;display:flex;align-items:center;gap:7px;
+  padding:0 10px;background:linear-gradient(180deg,#22363f,#141f25 70%,#0e161a);
+  border-bottom:2px solid var(--line);box-shadow:0 3px 14px rgba(0,0,0,.6);
+  overflow-x:auto;scrollbar-width:none}
 #top::-webkit-scrollbar{display:none}
-.res{display:flex;align-items:center;gap:6px;padding:3px 9px;border-radius:3px;white-space:nowrap;
-  background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.05)}
-.res .k{color:var(--dim);font-size:10px;letter-spacing:.1em}
-.res .v{font-weight:600;font-variant-numeric:tabular-nums}
-.res .d{font-size:10px;font-variant-numeric:tabular-nums}
-.up{color:var(--good)} .dn{color:var(--crit)}
-#clock{margin-left:auto;display:flex;align-items:center;gap:10px;padding-left:12px}
-#clock b{color:var(--amber-b);font-variant-numeric:tabular-nums}
-.tbtn{background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--text);
-  border-radius:3px;padding:4px 9px;cursor:pointer;font:inherit;font-size:11px}
-.tbtn:hover{background:rgba(255,255,255,.1)} .tbtn.on{background:var(--amber);color:#241a08;border-color:var(--amber)}
+#vault{display:flex;align-items:center;gap:8px;padding-right:10px;
+  border-right:2px solid var(--line);margin-right:3px;flex:none}
+#vault .disc{width:38px;height:38px;border-radius:50%;flex:none;
+  background:radial-gradient(circle at 34% 30%,#4a6d7c,#16242b 72%);
+  border:2px solid var(--line2);display:flex;align-items:center;justify-content:center;
+  color:var(--gold);font-weight:bold;font-size:13px;box-shadow:inset 0 0 9px rgba(0,0,0,.7)}
+#vault .lbl{font-size:9px;letter-spacing:.2em;color:var(--dim);text-transform:uppercase}
+#vault .num{font-size:15px;font-weight:bold;color:var(--gold);line-height:1.1}
+#vault .clk{font-size:9.5px;color:var(--dim);letter-spacing:.08em;line-height:1.2}
+.meter{display:flex;align-items:center;gap:7px;flex:none;background:rgba(0,0,0,.32);
+  border:1px solid var(--line);border-radius:6px;padding:5px 8px 5px 6px}
+.meter .ico{width:24px;height:24px;border-radius:5px;flex:none;display:flex;align-items:center;
+  justify-content:center;font-size:11px;font-weight:bold;color:#0d1418;
+  box-shadow:inset 0 -2px 4px rgba(0,0,0,.35)}
+.meter .body{min-width:82px}
+.meter .top{display:flex;justify-content:space-between;gap:10px;font-size:10px;
+  letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
+.meter .val{color:var(--text);font-weight:bold;letter-spacing:0;font-size:11.5px}
+.meter .val i{font-style:normal;color:var(--dim);font-weight:normal}
+.track{height:9px;margin-top:3px;border-radius:2px;background:#0a1216;
+  border:1px solid rgba(0,0,0,.6);overflow:hidden;position:relative}
+.track i{display:block;height:100%;transition:width .3s ease}
+.track:after{content:'';position:absolute;inset:0;
+  background:repeating-linear-gradient(90deg,transparent 0 6px,rgba(0,0,0,.55) 6px 8px)}
+.tag{display:flex;align-items:center;gap:6px;padding:6px 9px;flex:none;
+  background:rgba(0,0,0,.32);border:1px solid var(--line);border-radius:6px}
+.tag .k{font-size:9.5px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase}
+.tag .v{font-weight:bold;font-size:14px;color:var(--gold)}
+#tools{margin-left:auto;display:flex;gap:5px;align-items:center;padding-left:8px;flex:none;
+  position:sticky;right:0;background:linear-gradient(90deg,transparent,#16232a 14px)}
+.tbtn{font:inherit;font-size:11px;font-weight:bold;cursor:pointer;color:var(--text);white-space:nowrap;
+  background:linear-gradient(180deg,var(--steel3),var(--steel));border:1px solid var(--line2);
+  border-radius:5px;padding:7px 9px;letter-spacing:.05em;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.tbtn:hover{background:linear-gradient(180deg,#3a5c6b,var(--steel2))}
+.tbtn.on{background:linear-gradient(180deg,var(--gold),var(--gold2));color:var(--goldink);
+  border-color:var(--gold2)}
 
-/* build palette */
-#build{position:absolute;left:10px;top:54px;width:186px;padding:9px;max-height:calc(100% - 120px);
-  overflow-y:auto;scrollbar-width:thin}
-#build h3,#insp h3,#log h3{margin:0 0 8px;font-size:10px;letter-spacing:.2em;color:var(--amber);
-  text-transform:uppercase;font-weight:600}
-.rb{display:flex;align-items:center;gap:8px;width:100%;padding:6px 7px;margin-bottom:3px;
-  background:rgba(255,255,255,.03);border:1px solid transparent;border-radius:3px;
-  color:var(--text);font:inherit;font-size:11.5px;cursor:pointer;text-align:left}
-.rb:hover{background:rgba(255,255,255,.08);border-color:var(--line)}
-.rb.sel{background:rgba(224,157,59,.17);border-color:var(--amber)}
-.rb.locked{opacity:.36;cursor:not-allowed}
-.sw{width:11px;height:11px;border-radius:2px;flex:none;box-shadow:0 0 5px rgba(0,0,0,.5)}
-.rb .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.rb .ct{color:var(--dim);font-size:10px;font-variant-numeric:tabular-nums}
+/* floating room name plates */
+#labels{position:absolute;inset:0;overflow:hidden}
+.rl{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;
+  background:linear-gradient(180deg,rgba(36,58,68,.94),rgba(20,32,38,.94));
+  border:1px solid var(--line2);border-radius:5px;padding:3px 9px;font-size:10.5px;
+  color:var(--text);box-shadow:0 2px 8px rgba(0,0,0,.6);cursor:pointer;
+  display:flex;align-items:center;gap:7px}
+.rl b{color:var(--gold);font-size:10.5px;letter-spacing:.04em}
+.rl .st{color:var(--dim);font-size:9.5px}
+.rl .pips{display:flex;gap:2px}
+.rl .pips i{width:5px;height:5px;border-radius:50%;background:#0e181d;border:1px solid var(--line2)}
+.rl .pips i.on{background:var(--gold);border-color:var(--gold)}
+.rl.bad{border-color:var(--red)} .rl.bad b{color:var(--red)}
+
+/* build tray */
+#buildbtn{position:absolute;right:14px;bottom:44px;padding:13px 20px;font-size:13px}
+#tray{position:absolute;left:50%;bottom:44px;transform:translateX(-50%);
+  width:min(700px,calc(100% - 320px));padding:0 0 10px;display:none}
+#tray .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));
+  gap:7px;padding:0 10px;max-height:250px;overflow-y:auto}
+.rb{display:flex;align-items:center;gap:8px;padding:8px 9px;cursor:pointer;text-align:left;
+  background:linear-gradient(180deg,var(--steel3),var(--steel));border:1px solid var(--line);
+  border-radius:6px;color:var(--text);font:inherit;font-size:11.5px}
+.rb:hover{border-color:var(--line2);background:linear-gradient(180deg,#3a5c6b,var(--steel2))}
+.rb.sel{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+.rb.locked{opacity:.4;cursor:not-allowed}
+.rb .sw{width:22px;height:22px;border-radius:5px;flex:none;box-shadow:inset 0 -2px 4px rgba(0,0,0,.4)}
+.rb .nm{flex:1;overflow:hidden;text-overflow:ellipsis}
+.rb .ct{color:var(--gold);font-weight:bold;font-size:11px}
+.rb.locked .ct{color:var(--dim)}
 
 /* inspector */
-#insp{position:absolute;right:10px;top:54px;width:224px;padding:12px;display:none}
-#insp .t{font-size:15px;color:var(--amber-b);margin-bottom:2px}
+#insp{position:absolute;right:14px;top:72px;width:246px;padding:0 0 12px;display:none}
+#insp .in{padding:0 13px}
+#insp .t{font-size:16px;color:var(--gold);font-weight:bold;margin-bottom:1px}
 #insp .s{color:var(--dim);font-size:11px;margin-bottom:10px;line-height:1.45}
-.row{display:flex;justify-content:space-between;gap:8px;margin:4px 0;font-size:11.5px}
-.row span:last-child{font-variant-numeric:tabular-nums}
-.bar{height:4px;background:rgba(0,0,0,.45);border-radius:2px;overflow:hidden;margin:5px 0 9px}
-.bar i{display:block;height:100%;background:var(--amber);transition:width .25s}
-.acts{display:flex;gap:5px;margin-top:10px;flex-wrap:wrap}
-.acts button{flex:1;min-width:62px;padding:6px;font:inherit;font-size:11px;cursor:pointer;
-  border-radius:3px;border:1px solid var(--line);background:rgba(255,255,255,.06);color:var(--text)}
-.acts button:hover:not(:disabled){background:rgba(255,255,255,.13)}
-.acts button:disabled{opacity:.34;cursor:not-allowed}
-.acts button.pri{background:var(--amber);color:#241a08;border-color:var(--amber);font-weight:600}
+.row{display:flex;justify-content:space-between;gap:8px;margin:5px 0;font-size:11.5px}
+.row b{color:var(--text)}
+.bar{height:8px;background:#0a1216;border:1px solid rgba(0,0,0,.6);border-radius:2px;
+  overflow:hidden;margin:4px 0 9px;position:relative}
+.bar i{display:block;height:100%}
+.bar:after{content:'';position:absolute;inset:0;
+  background:repeating-linear-gradient(90deg,transparent 0 6px,rgba(0,0,0,.5) 6px 8px)}
+.acts{display:flex;gap:6px;margin-top:11px;flex-wrap:wrap}
+.acts button{flex:1;min-width:66px;padding:8px 6px;font:inherit;font-size:11px;font-weight:bold;
+  cursor:pointer;border-radius:5px;color:var(--text);
+  background:linear-gradient(180deg,var(--steel3),var(--steel));border:1px solid var(--line2)}
+.acts button:hover:not(:disabled){background:linear-gradient(180deg,#3a5c6b,var(--steel2))}
+.acts button:disabled{opacity:.35;cursor:not-allowed}
+.acts button.pri{background:linear-gradient(180deg,var(--gold),var(--gold2));
+  color:var(--goldink);border-color:var(--gold2)}
 
-/* notifications */
-#log{position:absolute;right:10px;bottom:38px;width:270px;padding:9px;max-height:190px;overflow:hidden;display:none}
-.note{font-size:11px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05);line-height:1.45}
+/* log, hints, overlays */
+#log{position:absolute;left:14px;bottom:44px;width:266px;padding:0 0 8px;display:none}
+#log .in{padding:0 12px;max-height:150px;overflow:hidden}
+.note{font-size:11px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.06);line-height:1.4}
 .note:last-child{border:0}
-.note.good{color:var(--good)} .note.warn{color:var(--warn)} .note.crit{color:var(--crit)}
-
-/* hint bar */
-#hint{position:absolute;left:0;right:0;bottom:0;height:28px;display:flex;align-items:center;
+.note.good{color:var(--green)} .note.warn{color:var(--amber)} .note.crit{color:var(--red)}
+#hint{position:absolute;left:0;right:0;bottom:0;height:32px;display:flex;align-items:center;
   padding:0 12px;gap:14px;font-size:10.5px;color:var(--dim);
-  background:linear-gradient(0deg,rgba(16,17,20,.97),rgba(16,17,20,.55));border-top:1px solid var(--line)}
-#hint b{color:var(--text);font-weight:600}
-#fps{margin-left:auto;font-variant-numeric:tabular-nums}
-
-/* build-mode banner + toast */
-#mode{position:absolute;left:50%;top:56px;transform:translateX(-50%);padding:6px 15px;
+  background:linear-gradient(0deg,#0e161a,rgba(14,22,26,.6));border-top:2px solid var(--line)}
+#hint b{color:var(--gold)}
+#fps{margin-left:auto}
+#mode{position:absolute;left:50%;top:72px;transform:translateX(-50%);padding:7px 15px;
   font-size:11.5px;display:none;white-space:nowrap}
-#mode b{color:var(--amber-b)}
-#toast{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:10px 20px;
-  font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;color:var(--crit)}
-/* first-person crosshair */
+#mode b{color:var(--gold)}
+#toast{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);padding:11px 20px;
+  font-size:13px;font-weight:bold;opacity:0;transition:opacity .25s;pointer-events:none;color:var(--red)}
 #cross{position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;
   display:none;pointer-events:none}
-#cross:before,#cross:after{content:'';position:absolute;background:rgba(231,223,201,.75);
+#cross:before,#cross:after{content:'';position:absolute;background:rgba(255,201,74,.85);
   box-shadow:0 0 3px rgba(0,0,0,.9)}
 #cross:before{left:7px;top:0;width:2px;height:16px}
 #cross:after{top:7px;left:0;height:2px;width:16px}
-#fpinfo{position:absolute;left:50%;bottom:52px;transform:translateX(-50%);padding:7px 14px;
+#fpinfo{position:absolute;left:50%;bottom:56px;transform:translateX(-50%);padding:8px 15px;
   font-size:11.5px;display:none;white-space:nowrap;text-align:center}
-#fpinfo b{color:var(--amber-b)}
-
-/* start / help overlay */
-#ov{position:fixed;inset:0;background:rgba(8,9,11,.93);display:flex;align-items:center;
-  justify-content:center;z-index:20;backdrop-filter:blur(3px)}
-#ov .box{max-width:470px;padding:30px 34px;text-align:left}
-#ov h1{margin:0 0 4px;font-size:27px;letter-spacing:.02em}
-#ov .tag{color:var(--amber);letter-spacing:.26em;font-size:10px;text-transform:uppercase;margin-bottom:14px}
-#ov p{color:var(--dim);line-height:1.65;margin:0 0 14px;font-size:12.5px}
-#ov .keys{display:grid;grid-template-columns:auto 1fr;gap:5px 13px;font-size:11.5px;margin:14px 0 20px}
-#ov .keys b{color:var(--amber-b);font-weight:600}
+#fpinfo b{color:var(--gold)}
+#ov{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 40%,#16242b,#080d10 70%);
+  display:flex;align-items:center;justify-content:center;z-index:20}
+#ov .box{max-width:480px;padding:0 0 26px;text-align:left}
+#ov .in{padding:0 30px}
+#ov h1{margin:0 0 3px;font-size:29px;letter-spacing:.01em;color:var(--gold)}
+#ov .tag2{color:var(--dim);letter-spacing:.24em;font-size:10px;text-transform:uppercase;margin-bottom:15px}
+#ov p{color:var(--dim);line-height:1.65;margin:0 0 13px;font-size:12.5px}
+#ov .keys{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:11.5px;margin:15px 0 20px}
+#ov .keys b{color:var(--gold);font-weight:bold}
 #ov .keys span{color:var(--dim)}
-#ov button{width:100%;padding:12px;font:inherit;font-weight:600;font-size:14px;cursor:pointer;
-  border-radius:4px;border:1px solid #6d5220;background:linear-gradient(180deg,var(--amber-b),var(--amber));color:#241a08}
-#ov button:hover{filter:brightness(1.09)}
-#ov .alt{background:none;border:1px solid var(--line);color:var(--text);font-weight:400;
-  margin-top:8px;font-size:12px;padding:9px}
-@media(max-width:760px){
-  #build{width:150px} #insp{width:196px} #log{display:none!important}
-  #hint{font-size:9.5px;gap:9px}
+#ov button{width:100%;padding:13px;font:inherit;font-weight:bold;font-size:14px;cursor:pointer;
+  border-radius:6px;border:1px solid var(--gold2);letter-spacing:.06em;
+  background:linear-gradient(180deg,var(--gold),var(--gold2));color:var(--goldink)}
+#ov button:hover{filter:brightness(1.08)}
+#ov .alt{background:linear-gradient(180deg,var(--steel3),var(--steel));color:var(--text);
+  border-color:var(--line2);margin-top:9px;font-size:12.5px;padding:11px}
+@media(max-width:820px){
+  #insp{width:206px} #log{display:none!important} #tray{width:calc(100% - 20px)}
+  .meter .body{min-width:66px} #hint{font-size:9.5px;gap:9px}
 }
 </style>
 </head>
@@ -121,38 +173,42 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:
 <canvas id="gl"></canvas>
 <div id="ui">
   <div id="top"></div>
-  <div id="build" class="pnl"><h3>Construction</h3><div id="rooms"></div></div>
+  <div id="labels"></div>
+  <div id="tray" class="pnl"><div class="hdr">Build a room</div><div class="grid" id="rooms"></div></div>
+  <button id="buildbtn" class="tbtn">BUILD</button>
   <div id="insp" class="pnl"></div>
-  <div id="log" class="pnl"><h3>Log</h3><div id="notes"></div></div>
+  <div id="log" class="pnl"><div class="hdr">Vault log</div><div class="in" id="notes"></div></div>
   <div id="mode" class="pnl"></div>
   <div id="toast" class="pnl"></div>
   <div id="cross"></div>
   <div id="fpinfo" class="pnl"></div>
   <div id="hint">
-    <span><b>LMB</b> select/place</span>
-    <span><b>RMB/2-finger</b> orbit</span>
+    <span><b>LMB</b> select / place</span>
+    <span><b>RMB</b> orbit</span>
     <span><b>Wheel</b> zoom</span>
-    <span><b>WASD</b> pan</span>
+    <span><b>Tab</b> walk inside</span>
     <span><b>Esc</b> cancel</span>
     <span id="fps"></span>
   </div>
 </div>
-<div id="ov"><div class="box">
-  <div class="tag">Original 3D shelter management</div>
-  <h1>Haven: Deep Shelter</h1>
-  <p>The blast doors are sealed. Dig out your shelter, keep power, water and
-     food flowing, and keep the people below alive.</p>
-  <p style="color:var(--dim)">Pick a room on the left, click a highlighted cell to dig it.
-     Staff it, and it starts producing. Watch the power balance.</p>
-  <div class="keys">
-    <b>LMB</b><span>Select a room, or place the one you picked</span>
-    <b>RMB / drag</b><span>Orbit the camera</span>
-    <b>Wheel</b><span>Zoom in close</span>
-    <b>WASD</b><span>Pan across the shelter</span>
-    <b>Tab</b><span>Walk the shelter in first person</span>
+<div id="ov"><div class="box pnl">
+  <div class="hdr">Vault-Tec Overseer Terminal</div>
+  <div class="in">
+    <h1>HAVEN</h1>
+    <div class="tag2">Deep Shelter &middot; Overseer Programme</div>
+    <p>The blast doors are sealed. Dig out your vault, keep power, water and
+       food flowing, and keep the people below alive.</p>
+    <p>Build a room, staff it, and it starts producing. Watch the power balance &mdash;
+       everything else runs off it.</p>
+    <div class="keys">
+      <b>LMB</b><span>Select a room, or place the one you picked</span>
+      <b>RMB drag</b><span>Orbit the vault</span>
+      <b>Wheel</b><span>Zoom</span>
+      <b>Tab</b><span>Walk the vault in first person</span>
+    </div>
+    <button id="play">ENTER THE VAULT</button>
+    <button id="cont" class="alt" style="display:none">Continue saved vault</button>
   </div>
-  <button id="play">Enter the shelter</button>
-  <button id="cont" class="alt" style="display:none">Continue saved shelter</button>
 </div></div>
 <script>
 "use strict";
@@ -641,6 +697,8 @@ function makeWorld(seed){
   const rng=makeRng(seed);
   const w={
     seed, rng, time:0, day:1, speed:1, paused:false,
+    // Vault designation, shown on the overseer HUD disc.
+    vaultNo: 100+((seed>>>3)%899),
     res:[90,180,180,420,25,260],
     cap:[200,320,320,400,120,1500],
     rooms:[], nextRoom:1, people:[], nextPerson:1,
@@ -1088,16 +1146,16 @@ function enterFP(w){
   fp={x:c.x, y:c.y, z:0, yaw:0, pitch:0, floor:e.floor, bob:0, t:0};
   document.getElementById('cross').style.display='block';
   document.getElementById('fpinfo').style.display='block';
-  document.getElementById('build').style.display='none';
   document.getElementById('insp').style.display='none';
-  buildMode=null; selRoom=null; updateMode();
+  buildMode=null; selRoom=null; updateMode(); showTray(false);
+  document.getElementById('buildbtn').style.display='none';
   canvas.requestPointerLock && canvas.requestPointerLock();
 }
 function exitFP(){
   fp=null;
   document.getElementById('cross').style.display='none';
   document.getElementById('fpinfo').style.display='none';
-  document.getElementById('build').style.display='';
+  document.getElementById('buildbtn').style.display='';
   if(document.pointerLockElement) document.exitPointerLock();
   uiInspDirty=true;
 }
@@ -1349,27 +1407,37 @@ function buildPalette(){
   const host=$('rooms'); host.innerHTML='';
   for(const d of ROOMS){
     const b=document.createElement('button');
-    b.className='rb'+(buildMode===d.id?' sel':'');
     const locked=population(world)<d.pop;
-    if(locked) b.className+=' locked';
+    b.className='rb'+(buildMode===d.id?' sel':'')+(locked?' locked':'');
     b.innerHTML='<span class="sw" style="background:'+hexCss(d.col)+'"></span>'+
       '<span class="nm">'+d.name+'</span>'+
-      '<span class="ct">'+(locked? 'pop '+d.pop : cost(world,d,0))+'</span>';
+      '<span class="ct">'+(locked? 'POP '+d.pop : cost(world,d,0))+'</span>';
     b.title=d.desc+(locked?'\nNeeds '+d.pop+' residents.':'');
     b.onclick=()=>{
       if(locked){ toast('Needs '+d.pop+' residents'); return; }
       buildMode = buildMode===d.id? null : d.id;
       selRoom=null; uiInspDirty=true; buildPalette(); updateMode();
+      if(!buildMode) showTray(false);
     };
     host.appendChild(b);
   }
+}
+// The build tray slides up from the bottom the way the vault builder does,
+// instead of sitting open down the side of the screen the whole time.
+let trayOpen=false;
+function showTray(v){
+  trayOpen=!!v;
+  $('tray').style.display=trayOpen?'block':'none';
+  $('buildbtn').className='tbtn'+(trayOpen?' on':'');
+  $('buildbtn').textContent=trayOpen?'CLOSE':'BUILD';
+  if(trayOpen) buildPalette();
 }
 function updateMode(){
   const m=$('mode');
   if(buildMode){
     const d=roomDef(buildMode);
     m.style.display='block';
-    m.innerHTML='Placing <b>'+d.name+'</b> — click a cell &nbsp;·&nbsp; <b>Esc</b> to cancel';
+    m.innerHTML='Placing <b>'+d.name+'</b> &nbsp;&middot;&nbsp; click a cell &nbsp;&middot;&nbsp; <b>Esc</b> to cancel';
   } else m.style.display='none';
 }
 let toastT=0;
@@ -1379,17 +1447,28 @@ function toast(msg){
 function updateTop(){
   const host=$('top');
   if(!host.dataset.init){
-    host.innerHTML=RES.map((r,i)=>
-      '<div class="res"><span class="k" style="color:'+hexCss(r.c)+'">'+r.k+'</span>'+
-      '<span class="v" id="rv'+i+'">0</span><span class="d" id="rd'+i+'"></span></div>').join('')+
-      '<div id="clock"><span id="pop"></span><b id="tday"></b>'+
-      '<button class="tbtn" id="bspeed">1x</button>'+
-      '<button class="tbtn" id="bstaff">Staff</button>'+
-      '<button class="tbtn" id="bfp">Walk in</button>'+
-      '<button class="tbtn" id="bq">RT</button></div>';
+    // Three headline resources get segmented meters; the rest are compact
+    // readouts, so the bar stays readable at a glance.
+    const meter=(i,ch)=>'<div class="meter"><div class="ico" style="background:'+hexCss(RES[i].c)+'">'+ch+'</div>'+
+      '<div class="body"><div class="top"><span>'+RES[i].n+'</span>'+
+      '<span class="val" id="mv'+i+'">0</span></div>'+
+      '<div class="track"><i id="mf'+i+'" style="width:0%;background:'+hexCss(RES[i].c)+'"></i></div>'+
+      '</div></div>';
+    const tag=(k,id)=>'<div class="tag"><span class="k">'+k+'</span><span class="v" id="'+id+'">0</span></div>';
+    host.innerHTML=
+      '<div id="vault"><div class="disc">V</div><div>'+
+        '<div class="lbl">Vault</div><div class="num" id="vno">---</div>'+
+        '<div class="clk" id="tday">DAY 1</div></div></div>'+
+      meter(R_POWER,'P')+meter(R_WATER,'W')+meter(R_FOOD,'F')+
+      tag('Pop','tpop')+tag('Mat','tmat')+tag('Med','tmed')+tag('Caps','tcap')+
+      '<div id="tools">'+
+        '<button class="tbtn" id="bspeed">1x</button>'+
+        '<button class="tbtn" id="bstaff">STAFF</button>'+
+        '<button class="tbtn" id="bfp">WALK IN</button>'+
+        '<button class="tbtn" id="bq">RT</button></div>';
     host.dataset.init='1';
     $('bspeed').onclick=()=>{
-      world.speed = world.speed===1?2 : world.speed===2?4 : world.speed===0?1 : 1;
+      world.speed = world.speed===1?2 : world.speed===2?4 : 1;
       if(world.paused){ world.paused=false; world.speed=1; }
       $('bspeed').textContent=world.speed+'x';
     };
@@ -1400,21 +1479,66 @@ function updateTop(){
     };
     $('bq').onclick=()=>{
       quality=(quality+1)%3;
-      $('bq').textContent=['RT off','RT light','RT low'][quality];
+      $('bq').textContent=['RT OFF','RT LIGHT','RT LOW'][quality];
       $('bq').className='tbtn'+(quality?' on':'');
     };
     $('bfp').onclick=()=>{ if(fp) exitFP(); else enterFP(world); };
-    $('bq').textContent='RT light'; $('bq').className='tbtn on';
+    $('bq').textContent='RT LIGHT'; $('bq').className='tbtn on';
   }
-  for(let i=0;i<6;i++){
-    $('rv'+i).textContent=Math.floor(world.res[i]);
-    const f=world.flow[i], d=$('rd'+i);
-    if(Math.abs(f)<0.4){ d.textContent=''; d.className='d'; }
-    else { d.textContent=(f>0?'▲':'▼')+Math.abs(f).toFixed(0); d.className='d '+(f>0?'up':'dn'); }
+  $('vno').textContent=world.vaultNo;
+  for(const i of [R_POWER,R_WATER,R_FOOD]){
+    const v=world.res[i], cap=Math.max(1,world.cap[i]), f=clamp(v/cap,0,1);
+    const flow=world.flow[i];
+    $('mv'+i).innerHTML=Math.floor(v)+'<i> / '+Math.floor(cap)+
+      (Math.abs(flow)<0.4?'':(flow>0?' &#9650;':' &#9660;')+Math.abs(flow).toFixed(0))+'</i>';
+    const bar=$('mf'+i);
+    bar.style.width=(f*100).toFixed(1)+'%';
+    // Colour follows scarcity, not the resource, so a shortfall reads instantly.
+    bar.style.background = f<0.12? 'var(--red)' : f<0.30? 'var(--amber)' : hexCss(RES[i].c);
   }
-  $('pop').innerHTML='<span style="color:var(--dim)">POP</span> '+population(world)+'/'+housing(world);
+  $('tpop').textContent=population(world)+'/'+housing(world);
+  $('tmat').textContent=Math.floor(world.res[R_MAT]);
+  $('tmed').textContent=Math.floor(world.res[R_MED]);
+  $('tcap').textContent=Math.floor(world.res[R_SCRIP]);
   const hr=Math.floor((world.time%SEC_PER_DAY)/SEC_PER_DAY*24);
-  $('tday').textContent='DAY '+world.day+'  '+String(hr).padStart(2,'0')+':00';
+  $('tday').innerHTML='DAY '+world.day+' &middot; '+String(hr).padStart(2,'0')+':00';
+}
+// Floating name plates over each room, the way the vault map labels its rooms.
+const labelEls=new Map();
+function updateLabels(){
+  const host=$('labels');
+  if(fp || !running){ if(host.childElementCount) { host.innerHTML=''; labelEls.clear(); } return; }
+  const vp=mMul(cam.proj,cam.view), W=canvas.clientWidth, H=canvas.clientHeight;
+  const live=new Set();
+  for(const r of world.rooms){
+    const c=roomCenter(r);
+    const y=c.y+FH*0.86;
+    const w=vp[3]*c.x+vp[7]*y+vp[11]*c.z+vp[15];
+    if(w<=0.05) continue;
+    const sx=(vp[0]*c.x+vp[4]*y+vp[8]*c.z+vp[12])/w;
+    const sy=(vp[1]*c.x+vp[5]*y+vp[9]*c.z+vp[13])/w;
+    if(sx<-1.3||sx>1.3||sy<-1.3||sy>1.3) continue;
+    live.add(r.id);
+    let el=labelEls.get(r.id);
+    if(!el){
+      el=document.createElement('div'); el.className='rl';
+      el.onclick=()=>{ selRoom=r.id; uiInspDirty=true; };
+      host.appendChild(el); labelEls.set(r.id,el);
+    }
+    el.style.left=((sx*0.5+0.5)*W).toFixed(0)+'px';
+    el.style.top =((0.5-sy*0.5)*H).toFixed(0)+'px';
+    const d=roomDef(r.def), slots=roomSlots(r);
+    let pips=''; for(let i=1;i<=3;i++) pips+='<i class="'+(i<=r.lvl?'on':'')+'"></i>';
+    let st;
+    if(r.progress<1) st=Math.round(r.progress*100)+'%';
+    else if(r.broken) st='BROKEN';
+    else if(slots>0) st=r.staff.length+'/'+slots;
+    else st='';
+    el.className='rl'+((r.broken||(r.progress>=1&&r.cond<0.35))?' bad':'');
+    el.innerHTML='<b>'+d.name+'</b><span class="pips">'+pips+'</span>'+
+      (st?'<span class="st">'+st+'</span>':'');
+  }
+  for(const [id,el] of labelEls){ if(!live.has(id)){ el.remove(); labelEls.delete(id); } }
 }
 function updateNotes(){
   const host=$('notes'), n=world.notes.slice(0,7);
@@ -1428,15 +1552,15 @@ function updateInsp(){
   if(!r){ selRoom=null; box.style.display='none'; return; }
   const d=roomDef(r.def), slots=roomSlots(r);
   const up=upgradeCost(r), canUp=r.lvl<3 && world.res[R_MAT]>=up;
-  let html='<div class="t">'+d.name+'</div><div class="s">'+d.desc+'</div>';
-  html+='<div class="row"><span>Level</span><span>'+r.lvl+' / 3</span></div>';
+  let html='<div class="hdr">Room &middot; Level '+r.lvl+'</div><div class="in">'+
+    '<div class="t">'+d.name+'</div><div class="s">'+d.desc+'</div>';
   if(r.progress<1){
     html+='<div class="row"><span>Building</span><span>'+Math.round(r.progress*100)+'%</span></div>'+
           '<div class="bar"><i style="width:'+(r.progress*100)+'%"></i></div>';
   } else {
     html+='<div class="row"><span>Condition</span><span>'+Math.round(r.cond*100)+'%</span></div>'+
           '<div class="bar"><i style="width:'+(r.cond*100)+'%;background:'+
-          (r.cond<0.3?'var(--crit)':'var(--amber)')+'"></i></div>';
+          (r.cond<0.3?'var(--red)':'var(--amber)')+'"></i></div>';
     if(slots>0){
       html+='<div class="row"><span>Staff</span><span>'+r.staff.length+' / '+slots+'</span></div>';
       html+='<div class="row"><span>Efficiency</span><span>'+Math.round(crew(world,r)*100)+'%</span></div>';
@@ -1446,14 +1570,14 @@ function updateInsp(){
       html+='<div class="row"><span>Output</span><span>'+rate.toFixed(1)+' '+RES[d.prod].k+'/min</span></div>';
     }
     if(d.power>0) html+='<div class="row"><span>Draw</span><span>'+roomPower(r).toFixed(1)+' PWR/min</span></div>';
-    if(r.broken) html+='<div class="row" style="color:var(--crit)"><span>Status</span><span>BROKEN</span></div>';
+    if(r.broken) html+='<div class="row" style="color:var(--red)"><span>Status</span><span>BROKEN</span></div>';
   }
   html+='<div class="acts">';
   if(r.broken) html+='<button class="pri" id="afix">Repair 40</button>';
   html+='<button id="aup"'+(canUp?' class="pri"':' disabled')+'>Upgrade '+up+'</button>';
   if(slots>0) html+='<button id="aman">Staff</button>';
   if(!r.entrance) html+='<button id="adel">Demolish</button>';
-  html+='</div>';
+  html+='</div></div>';
   box.innerHTML=html; box.style.display='block';
 
   const fix=$('afix'); if(fix) fix.onclick=()=>{
@@ -1503,7 +1627,7 @@ addEventListener('keydown',e=>{
   }
   if(e.code==='Escape'){
     if(fp){ exitFP(); return; }
-    buildMode=null; selRoom=null; buildPalette(); updateMode(); uiInspDirty=true;
+    buildMode=null; selRoom=null; buildPalette(); updateMode(); showTray(false); uiInspDirty=true;
   }
   if(e.code==='Space'){ e.preventDefault(); world.paused=!world.paused;
     $('bspeed').textContent=world.paused?'||':world.speed+'x'; }
@@ -1566,7 +1690,7 @@ canvas.addEventListener('pointerup',e=>{
       w:d.w, lvl:1, cond:1, staff:[], progress:0, broken:false, anim:Math.random()*6});
     world.built++;
     note(world,d.name+' excavation started on level '+(cell.floor+1)+'.','');
-    if(!keys.ShiftLeft&&!keys.ShiftRight){ buildMode=null; buildPalette(); updateMode(); }
+    if(!keys.ShiftLeft&&!keys.ShiftRight){ buildMode=null; buildPalette(); updateMode(); showTray(false); }
     recalcCaps(world); uiTopDirty=true;
   } else {
     const hit=roomAt(world,cell.floor,cell.col);
@@ -1647,6 +1771,7 @@ function frame(t){
   render(world,dt);
 
   if(toastT>0){ toastT-=dt; if(toastT<=0) $('toast').style.opacity='0'; }
+  updateLabels();
   if(uiTopDirty){ updateTop(); uiTopDirty=false; }
   if(uiNotesDirty){ updateNotes(); uiNotesDirty=false; }
   if(uiInspDirty){ updateInsp(); buildPalette(); uiInspDirty=false; }
@@ -1666,7 +1791,8 @@ requestAnimationFrame(frame);
 function start(w){
   world=w; running=true;
   $('ov').style.display='none';
-  buildPalette(); updateTop(); updateNotes(); updateInsp(); updateMode();
+  buildPalette(); updateTop(); updateNotes(); updateInsp(); updateMode(); showTray(false);
+  $('buildbtn').onclick=()=>showTray(!trayOpen);
   // frame the shelter
   const c=roomCenter(world.rooms[0]);
   cam.tfx=cam.fx=c.x; cam.tfy=cam.fy=c.y-1; cam.tfz=cam.fz=0;
