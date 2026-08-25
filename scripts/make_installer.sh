@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds a randomly-named installer in dist/ by embedding the current source tree (as a
+# Builds a randomly-named HTML installer page in dist/ by embedding the current source tree (as a
 # gzip+base64 tarball) into the installer template below. Run this whenever
 # src/, CMakeLists.txt, cmake/ or shaders/ change, and commit the result —
 # the generated dist/*.sh is the actual shipped deliverable; this script is
@@ -31,7 +31,7 @@ PAYLOAD_SIZE=$(wc -c < "$PAYLOAD_TAR" | tr -d ' ')
 VERSION="$(grep -m1 'project(Haven VERSION' CMakeLists.txt | sed -E 's/.*VERSION ([0-9.]+).*/\1/')"
 
 mkdir -p dist
-find dist -maxdepth 1 -name '*.sh' -delete
+find dist -maxdepth 1 \( -name '*.sh' -o -name '*.html' \) -delete
 {
   sed "s/__HAVEN_VERSION__/${VERSION}/g; s/__HAVEN_PAYLOAD_SIZE__/${PAYLOAD_SIZE}/g; s/__HAVEN_INSTALLER_NAME__/${INSTALLER_NAME}/g" scripts/installer_template.sh
   echo "HAVEN_PAYLOAD_B64='${PAYLOAD_B64}'"
@@ -39,4 +39,31 @@ find dist -maxdepth 1 -name '*.sh' -delete
 } > "$OUT"
 chmod +x "$OUT"
 
-echo "Wrote $OUT ($(wc -c < "$OUT" | tr -d ' ') bytes, payload $PAYLOAD_SIZE bytes)"
+SH_SIZE=$(wc -c < "$OUT" | tr -d ' ')
+
+# ---------------------------------------------------------------------------
+#  Wrap the shell installer in a self-contained HTML page. The page carries
+#  the whole .sh base64-encoded and hands it back via a Blob download, so a
+#  single .html file is everything a player needs. The .sh itself is a build
+#  intermediate and is not shipped separately.
+# ---------------------------------------------------------------------------
+HTML_NAME="${INSTALLER_NAME%.sh}.html"
+HTML_OUT="dist/${HTML_NAME}"
+B64_TMP="$(mktemp -t haven_b64.XXXXXX)"
+trap 'rm -f "$PAYLOAD_TAR" "$B64_TMP"' EXIT
+base64 < "$OUT" > "$B64_TMP"
+
+# The payload is ~270 KB, so it is streamed in at a marker rather than
+# substituted with sed, which chokes on replacements that large.
+sed "s/__VERSION__/${VERSION}/g; s/__NAME__/${INSTALLER_NAME}/g; s/__SIZE_KB__/$((SH_SIZE / 1024))/g" \
+    scripts/installer_page_template.html |
+awk -v payload="$B64_TMP" '
+  /__PAYLOAD_B64__/ { while ((getline line < payload) > 0) print line; next }
+  { print }
+' > "$HTML_OUT"
+
+# The .sh was only needed to build the page.
+rm -f "$OUT"
+
+echo "Wrote $HTML_OUT ($(wc -c < "$HTML_OUT" | tr -d ' ') bytes)"
+echo "  embeds ${INSTALLER_NAME} (${SH_SIZE} bytes, source payload ${PAYLOAD_SIZE} bytes)"

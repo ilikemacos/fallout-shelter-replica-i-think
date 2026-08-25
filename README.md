@@ -9,28 +9,31 @@ at build/runtime — nothing is copied from any existing game.
 
 ## Installing
 
-Download the installer from `dist/` in this repository — **its filename is
-randomised on every build**, so it will be something like `gdyfpo.sh`, not a
-fixed name. Drop it in `~/Downloads/` and run it:
+The installer is a single self-contained **HTML page** in `dist/` — its
+filename is randomised on every build, so it will be something like
+`yulakx.html`. Open it in a browser, click **Download installer**, then run
+the command it shows you:
 
 ```bash
-chmod +x ~/Downloads/gdyfpo.sh
-~/Downloads/gdyfpo.sh
+chmod +x ~/Downloads/yulakx.sh && ~/Downloads/yulakx.sh
 ```
 
-It detects Apple Silicon and your macOS version, installs a compiler
-toolchain automatically if needed, downloads CMake if it isn't already on
-your system, builds Haven from source in Release mode, **verifies the build
-by actually running its test suite on your machine**, installs `Haven.app`
-to `/Applications`, and creates a `haven` command-line launcher. Nothing
-else is required — no Xcode, no Homebrew, no Python, no Node. Run the same
-script again any time to rebuild and update; your saves live under
-`~/Library/Application Support/Haven` and are never touched.
+The page carries the whole shell installer base64-encoded inside it, and the
+shell installer in turn carries the game's entire source, so that one `.html`
+file is everything a player needs — no repository checkout, no network fetch
+for the game itself.
 
-The installer embeds the game's full source directly in the script (as a
-compressed archive) and builds it locally, so what you get is a real,
-optimized, native arm64 build — run `scripts/make_installer.sh` to
-regenerate it (under a fresh random name) after changing the source.
+The installer detects Apple Silicon and your macOS version, installs a
+compiler toolchain automatically if needed, downloads CMake only if it isn't
+already present, builds Haven from source in Release mode, **verifies the
+build by actually running its test suite on your machine**, installs
+`Haven.app` to `/Applications`, and creates a `haven` command-line launcher.
+No Xcode, Homebrew, Python or Node required. Re-running it rebuilds and
+updates in place; saves live under `~/Library/Application Support/Haven` and
+are never touched.
+
+Run `scripts/make_installer.sh` to regenerate the page (under a fresh random
+name) after changing the source.
 
 ## Building from source directly
 
@@ -78,7 +81,7 @@ for iterating on gameplay without a Mac.
 The simulation core, renderer abstraction, OpenGL backend, scene layer, and
 save system are built and unit-tested (`cmake --build && ./build/haven_tests`
 passes, including a full round-trip test of the exact source embedded in
-the installer in `dist/`). The macOS-specific window/audio/UI/app layer is
+the installer page in `dist/`). The macOS-specific window/audio/UI/app layer is
 Cocoa/OpenGL/AudioToolbox code that cannot be compiled or run outside a real
 macOS + Xcode toolchain, so it has not been build-verified in this
 environment — run the installer on Apple Silicon hardware to build and play
