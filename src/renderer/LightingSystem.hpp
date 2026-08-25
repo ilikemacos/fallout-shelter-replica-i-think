@@ -19,19 +19,34 @@ public:
 
     /// Culls to the N most influential lights near `eye` so a large shelter
     /// with hundreds of fixtures still renders a bounded light count.
-    std::vector<Light> nearest(const Vec3& eye, size_t maxCount) const {
-        std::vector<Light> sorted = lights_;
-        std::sort(sorted.begin(), sorted.end(), [&](const Light& a, const Light& b) {
+    /// Uses partial_sort into a reused buffer: fully sorting hundreds of
+    /// lights every frame to then throw all but ~16 away was wasted work,
+    /// and the temporary vector was a per-frame heap allocation.
+    const std::vector<Light>& nearest(const Vec3& eye, size_t maxCount) const {
+        scratch_ = lights_;
+        const size_t keep = std::min(maxCount, scratch_.size());
+        auto byDistance = [&](const Light& a, const Light& b) {
+            // Directional lights have no position; keep them first, they
+            // always affect the whole scene.
+            const bool ad = a.type == LightType::Directional;
+            const bool bd = b.type == LightType::Directional;
+            if (ad != bd) return ad;
             return distanceSq(a.position, eye) < distanceSq(b.position, eye);
-        });
-        if (sorted.size() > maxCount) sorted.resize(maxCount);
-        return sorted;
+        };
+        if (keep < scratch_.size())
+            std::partial_sort(scratch_.begin(), scratch_.begin() + static_cast<long>(keep),
+                              scratch_.end(), byDistance);
+        else
+            std::sort(scratch_.begin(), scratch_.end(), byDistance);
+        scratch_.resize(keep);
+        return scratch_;
     }
 
     static constexpr size_t kMaxLights = 512;
 
 private:
     std::vector<Light> lights_;
+    mutable std::vector<Light> scratch_;   ///< reused by nearest(), never reallocated after warm-up
     Vec3 ambient_{0.09f, 0.10f, 0.12f};   ///< cool, dim — this is a bunker, not daylight
 };
 

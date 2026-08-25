@@ -3,7 +3,6 @@
 #include "core/Random.hpp"
 #include <algorithm>
 #include <cmath>
-#include <unordered_map>
 
 namespace hv::scene {
 namespace {
@@ -159,30 +158,41 @@ void SceneRenderer::render(CommandBuffer& cmd, const Frustum& frustum, const Mat
     // The shadow-ray "box soup": one coarse box per room, nearest to the
     // camera first, since the shader only tests a bounded number of them.
     if (rayTracingLevel > 0) {
-        std::vector<AABB> occluders;
-        occluders.reserve(roomInstances_.size());
-        for (const RoomInstance& r : roomInstances_) occluders.push_back(r.bounds);
-        std::sort(occluders.begin(), occluders.end(), [&](const AABB& a, const AABB& b) {
+        scratchOccluders_.clear();
+        for (const RoomInstance& r : roomInstances_) scratchOccluders_.push_back(r.bounds);
+        // Only the closest boxes are uploaded, so partial_sort is enough.
+        const size_t keep = std::min<size_t>(kMaxOccluderBoxes, scratchOccluders_.size());
+        auto byDistance = [&](const AABB& a, const AABB& b) {
             return distanceSq(a.center(), eye) < distanceSq(b.center(), eye);
-        });
-        cmd.setOccluders(std::move(occluders));
+        };
+        if (keep < scratchOccluders_.size())
+            std::partial_sort(scratchOccluders_.begin(),
+                              scratchOccluders_.begin() + static_cast<long>(keep),
+                              scratchOccluders_.end(), byDistance);
+        else
+            std::sort(scratchOccluders_.begin(), scratchOccluders_.end(), byDistance);
+        scratchOccluders_.resize(keep);
+        cmd.setOccluders(scratchOccluders_);
     }
     cmd.setRayTracingLevel(rayTracingLevel);
 
     // Floors: one flat slab per room, always drawn (cheap, establishes footing).
-    std::vector<InstanceData> floors;
+    scratchFloors_.clear();
     for (const RoomInstance& r : roomInstances_) {
         if (!frustum.intersects(r.bounds)) continue;
         InstanceData id; id.model = Mat4::translate(r.bounds.center() * Vec3{1,0,1} + Vec3{0, r.bounds.min.y, 0});
         id.colorTint = Vec4{1,1,1,1};
-        floors.push_back(id);
+        scratchFloors_.push_back(id);
     }
-    if (!floors.empty()) cmd.drawInstanced(meshes_.roomShellFloor, meshes_.concrete, floors);
+    if (!scratchFloors_.empty()) cmd.drawInstanced(meshes_.roomShellFloor, meshes_.concrete, scratchFloors_);
 
     // Machinery / furniture, batched per room-type mesh (generator drums,
     // water tanks, plant racks, bunks, ...) so each room actually shows the
     // fixture that matches what it does, not one generic crate everywhere.
-    std::unordered_map<u32, std::vector<InstanceData>> byMesh;
+    // A small flat vector keyed by mesh index beats a hash map here: there
+    // are only a handful of distinct room meshes, and this reuses its
+    // storage across frames instead of rebuilding buckets every frame.
+    for (auto& bucket : scratchByMesh_) bucket.second.clear();
     for (const RoomInstance& r : roomInstances_) {
         if (!frustum.intersects(r.bounds)) continue;
         InstanceData id; id.model = r.model;
@@ -190,24 +200,31 @@ void SceneRenderer::render(CommandBuffer& cmd, const Frustum& frustum, const Mat
         const f32 dim = r.broken ? 0.4f : (1.0f - r.fire * 0.3f);
         id.colorTint = Vec4{tint.x * dim, tint.y * dim, tint.z * dim, 1};
         id.customA = r.fire > 0.05f ? 1.0f : 0.0f;
-        const MeshHandle mesh = meshForRoom(meshes_, r.type);
-        byMesh[mesh.index].push_back(id);
+        const u32 meshIndex = meshForRoom(meshes_, r.type).index;
+        auto it = std::find_if(scratchByMesh_.begin(), scratchByMesh_.end(),
+                               [meshIndex](const auto& b) { return b.first == meshIndex; });
+        if (it == scratchByMesh_.end()) {
+            scratchByMesh_.emplace_back(meshIndex, std::vector<InstanceData>{});
+            it = scratchByMesh_.end() - 1;
+        }
+        it->second.push_back(id);
     }
-    for (auto& [meshIndex, instances] : byMesh) {
-        const MeshHandle mesh{meshIndex, 1};
-        cmd.drawInstanced(mesh, meshes_.machineHousing, std::move(instances));
+    for (const auto& [meshIndex, instances] : scratchByMesh_) {
+        if (instances.empty()) continue;
+        cmd.drawInstanced(MeshHandle{meshIndex, 1}, meshes_.machineHousing, instances);
     }
 
     // Residents, instanced per skin/outfit bucket to keep draw calls low even
     // with hundreds on screen.
     for (u8 skin = 0; skin < 6; ++skin) {
-        std::vector<InstanceData> batch;
+        scratchBatch_.clear();
         for (const ResidentInstance& r : residentInstances_) {
             if (r.skinIdx != skin || !frustum.intersects(r.bounds)) continue;
             InstanceData id; id.model = r.model; id.colorTint = Vec4{1,1,1,1};
-            batch.push_back(id);
+            scratchBatch_.push_back(id);
         }
-        if (!batch.empty()) cmd.drawInstanced(meshes_.residentBody, meshes_.residentSkin[skin], batch);
+        if (!scratchBatch_.empty())
+            cmd.drawInstanced(meshes_.residentBody, meshes_.residentSkin[skin], scratchBatch_);
     }
 
     cmd.endPass();

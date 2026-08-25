@@ -60,6 +60,8 @@ std::unique_ptr<GLDevice> GLDevice::create(i32 pixelWidth, i32 pixelHeight) {
         return nullptr;
     }
 
+    dev->cacheSceneUniforms();
+
     glGenQueries(1, &dev->timerQueryFront_);
     glGenQueries(1, &dev->timerQueryBack_);
 
@@ -84,6 +86,34 @@ GLDevice::~GLDevice() {
     if (sceneShader_) glDeleteProgram(sceneShader_);
     if (timerQueryFront_) glDeleteQueries(1, &timerQueryFront_);
     if (timerQueryBack_) glDeleteQueries(1, &timerQueryBack_);
+}
+
+void GLDevice::cacheSceneUniforms() {
+    auto U = [&](const char* n) { return static_cast<i32>(glGetUniformLocation(sceneShader_, n)); };
+    su_.view = U("uView");                 su_.proj = U("uProj");
+    su_.model = U("uModel");               su_.instanced = U("uInstanced");
+    su_.eyePos = U("uEyePos");             su_.albedo = U("uAlbedo");
+    su_.metallic = U("uMetallic");         su_.roughness = U("uRoughness");
+    su_.emissive = U("uEmissive");         su_.surfaceKind = U("uSurfaceKind");
+    su_.texScale = U("uTexScale");
+    su_.ambientSky = U("uAmbientSky");     su_.ambientGround = U("uAmbientGround");
+    su_.exposure = U("uExposure");         su_.fogDensity = U("uFogDensity");
+    su_.fogColor = U("uFogColor");         su_.saturation = U("uSaturation");
+    su_.shadowTint = U("uShadowTint");     su_.highlightTint = U("uHighlightTint");
+    su_.contrast = U("uContrast");         su_.vignette = U("uVignette");
+    su_.viewportSize = U("uViewportSize"); su_.lightCount = U("uLightCount");
+    su_.boxCount = U("uBoxCount");         su_.boxMin = U("uBoxMin");
+    su_.boxMax = U("uBoxMax");             su_.rayTracedShadows = U("uRayTracedShadows");
+    su_.hasAlbedoTex = U("uHasAlbedoTex"); su_.albedoTex = U("uAlbedoTex");
+    for (int i = 0; i < shaders::kMaxLights; ++i) {
+        char name[64];
+        std::snprintf(name, sizeof name, "uLights[%d].posType", i);
+        su_.lightPosType[i] = U(name);
+        std::snprintf(name, sizeof name, "uLights[%d].colorIntensity", i);
+        su_.lightColorIntensity[i] = U(name);
+        std::snprintf(name, sizeof name, "uLights[%d].params", i);
+        su_.lightParams[i] = U(name);
+    }
 }
 
 void GLDevice::queryDeviceInfo() {
@@ -365,36 +395,38 @@ void GLDevice::executePass(const CommandBuffer::Pass& pass) {
     if (clearMask) glClear(clearMask);
 
     glUseProgram(sceneShader_);
-    glUniformMatrix4fv(glGetUniformLocation(sceneShader_, "uView"), 1, GL_FALSE, pass.view.m);
-    glUniformMatrix4fv(glGetUniformLocation(sceneShader_, "uProj"), 1, GL_FALSE, pass.proj.m);
-    glUniform3f(glGetUniformLocation(sceneShader_, "uEyePos"), pass.eye.x, pass.eye.y, pass.eye.z);
+    glUniformMatrix4fv(su_.view, 1, GL_FALSE, pass.view.m);
+    glUniformMatrix4fv(su_.proj, 1, GL_FALSE, pass.proj.m);
+    glUniform3f(su_.eyePos, pass.eye.x, pass.eye.y, pass.eye.z);
     // Sky-and-bounce ambient rather than one flat number: warm light down
     // from the ceiling fixtures, cooler light bounced back up off the floor,
     // so shadowed surfaces keep colour instead of going flat grey. Tuned
     // against the exposure + filmic tonemap below, not as raw radiance.
-    glUniform3fv(glGetUniformLocation(sceneShader_, "uAmbientSky"), 1, shaders::kTone.ambientSky);
-    glUniform3fv(glGetUniformLocation(sceneShader_, "uAmbientGround"), 1, shaders::kTone.ambientGround);
-    glUniform1f(glGetUniformLocation(sceneShader_, "uExposure"), shaders::kTone.exposure);
-    glUniform1f(glGetUniformLocation(sceneShader_, "uFogDensity"), shaders::kTone.fogDensity);
+    glUniform3fv(su_.ambientSky, 1, shaders::kTone.ambientSky);
+    glUniform3fv(su_.ambientGround, 1, shaders::kTone.ambientGround);
+    glUniform1f(su_.exposure, shaders::kTone.exposure);
+    glUniform1f(su_.fogDensity, shaders::kTone.fogDensity);
     // Warm amber haze, matching the industrial fixture colour, rather than a
     // neutral grey — corridors recede into the shelter's own light instead
     // of a generic fog wall.
-    glUniform3fv(glGetUniformLocation(sceneShader_, "uFogColor"), 1, shaders::kTone.fogColor);
-    glUniform1f(glGetUniformLocation(sceneShader_, "uSaturation"), shaders::kGrade.saturation);
-    glUniform3fv(glGetUniformLocation(sceneShader_, "uShadowTint"), 1, shaders::kGrade.shadowTint);
-    glUniform3fv(glGetUniformLocation(sceneShader_, "uHighlightTint"), 1, shaders::kGrade.highlightTint);
-    glUniform1f(glGetUniformLocation(sceneShader_, "uContrast"), shaders::kGrade.contrast);
-    glUniform1f(glGetUniformLocation(sceneShader_, "uVignette"), shaders::kGrade.vignette);
-    glUniform2f(glGetUniformLocation(sceneShader_, "uViewportSize"),
+    glUniform3fv(su_.fogColor, 1, shaders::kTone.fogColor);
+    glUniform1f(su_.saturation, shaders::kGrade.saturation);
+    glUniform3fv(su_.shadowTint, 1, shaders::kGrade.shadowTint);
+    glUniform3fv(su_.highlightTint, 1, shaders::kGrade.highlightTint);
+    glUniform1f(su_.contrast, shaders::kGrade.contrast);
+    glUniform1f(su_.vignette, shaders::kGrade.vignette);
+    glUniform2f(su_.viewportSize,
                 static_cast<f32>(width_), static_cast<f32>(height_));
     // World-space frequency multiplier for the procedural textures. 1.0 means
     // the noise/lattice scales in the shader are read directly in world units.
-    glUniform1f(glGetUniformLocation(sceneShader_, "uTexScale"), 1.0f);
+    glUniform1f(su_.texScale, 1.0f);
 
     // Box soup for the ray-traced shadow pass.
-    const int boxCount = std::min<int>(static_cast<int>(pass.occluders.size()), shaders::kMaxShadowBoxes);
-    glUniform1i(glGetUniformLocation(sceneShader_, "uBoxCount"), boxCount);
-    glUniform1i(glGetUniformLocation(sceneShader_, "uRayTracedShadows"), pass.rayTracingLevel);
+    static_assert(kMaxOccluderBoxes == shaders::kMaxShadowBoxes,
+                  "renderer occluder cap must match the shader's box-soup array size");
+    const int boxCount = std::min<int>(static_cast<int>(pass.occluders.size()), kMaxOccluderBoxes);
+    glUniform1i(su_.boxCount, boxCount);
+    glUniform1i(su_.rayTracedShadows, pass.rayTracingLevel);
     if (boxCount > 0) {
         std::vector<f32> mins(static_cast<size_t>(boxCount) * 3);
         std::vector<f32> maxs(static_cast<size_t>(boxCount) * 3);
@@ -407,24 +439,27 @@ void GLDevice::executePass(const CommandBuffer::Pass& pass) {
             maxs[static_cast<size_t>(i) * 3 + 1] = b.max.y;
             maxs[static_cast<size_t>(i) * 3 + 2] = b.max.z;
         }
-        glUniform3fv(glGetUniformLocation(sceneShader_, "uBoxMin"), boxCount, mins.data());
-        glUniform3fv(glGetUniformLocation(sceneShader_, "uBoxMax"), boxCount, maxs.data());
+        glUniform3fv(su_.boxMin, boxCount, mins.data());
+        glUniform3fv(su_.boxMax, boxCount, maxs.data());
     }
 
     const int lightCount = std::min<int>(static_cast<int>(pass.lights.size()), shaders::kMaxLights);
-    glUniform1i(glGetUniformLocation(sceneShader_, "uLightCount"), lightCount);
+    glUniform1i(su_.lightCount, lightCount);
     for (int i = 0; i < lightCount; ++i) {
         const Light& L = pass.lights[static_cast<size_t>(i)];
-        char name[64];
-        std::snprintf(name, sizeof name, "uLights[%d].posType", i);
         const Vec3 posOrDir = L.type == LightType::Directional ? L.direction : L.position;
-        glUniform4f(glGetUniformLocation(sceneShader_, name), posOrDir.x, posOrDir.y, posOrDir.z,
+        glUniform4f(su_.lightPosType[i], posOrDir.x, posOrDir.y, posOrDir.z,
                    L.type == LightType::Directional ? 0.0f : (L.type == LightType::Spot ? 2.0f : 1.0f));
-        std::snprintf(name, sizeof name, "uLights[%d].colorIntensity", i);
-        glUniform4f(glGetUniformLocation(sceneShader_, name), L.color.x, L.color.y, L.color.z, L.intensity);
-        std::snprintf(name, sizeof name, "uLights[%d].params", i);
-        glUniform4f(glGetUniformLocation(sceneShader_, name), L.range, L.innerCone, L.outerCone, 0.0f);
+        glUniform4f(su_.lightColorIntensity[i], L.color.x, L.color.y, L.color.z, L.intensity);
+        glUniform4f(su_.lightParams[i], L.range, L.innerCone, L.outerCone, 0.0f);
     }
+
+    // Redundant-state tracking: consecutive draws usually share a material,
+    // a VAO and an instancing mode, and re-uploading identical uniforms or
+    // re-binding the same VAO is pure driver overhead.
+    u32 boundMaterial = 0xFFFFFFFFu;
+    u32 boundVao = 0xFFFFFFFFu;
+    int boundInstanced = -1;
 
     for (const DrawItem& item : pass.items) {
         auto meshIt = meshes_.find(item.mesh.index);
@@ -432,31 +467,35 @@ void GLDevice::executePass(const CommandBuffer::Pass& pass) {
         if (meshIt == meshes_.end() || matIt == materials_.end()) continue;
         const MaterialDesc& md = matIt->second.desc;
 
-        glUniform3f(glGetUniformLocation(sceneShader_, "uAlbedo"), md.albedoTint.x, md.albedoTint.y, md.albedoTint.z);
-        glUniform1f(glGetUniformLocation(sceneShader_, "uMetallic"), md.metallic);
-        glUniform1f(glGetUniformLocation(sceneShader_, "uRoughness"), md.roughness);
-        glUniform1f(glGetUniformLocation(sceneShader_, "uEmissive"), md.emissiveStrength);
-        glUniform1i(glGetUniformLocation(sceneShader_, "uSurfaceKind"), static_cast<int>(md.surface));
-        const bool hasTex = md.albedo.valid() && textures_.count(md.albedo.index) != 0;
-        glUniform1i(glGetUniformLocation(sceneShader_, "uHasAlbedoTex"), hasTex ? 1 : 0);
-        if (hasTex) {
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, textures_[md.albedo.index].id);
-            glUniform1i(glGetUniformLocation(sceneShader_, "uAlbedoTex"), 0);
-        }
-        if (md.cull == CullMode::None) glDisable(GL_CULL_FACE);
-        else { glEnable(GL_CULL_FACE); glCullFace(md.cull == CullMode::Front ? GL_FRONT : GL_BACK); }
-        if (md.blend == BlendMode::Opaque) glDisable(GL_BLEND);
-        else {
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, md.blend == BlendMode::Additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+        if (item.material.index != boundMaterial) {
+            boundMaterial = item.material.index;
+            glUniform3f(su_.albedo, md.albedoTint.x, md.albedoTint.y, md.albedoTint.z);
+            glUniform1f(su_.metallic, md.metallic);
+            glUniform1f(su_.roughness, md.roughness);
+            glUniform1f(su_.emissive, md.emissiveStrength);
+            glUniform1i(su_.surfaceKind, static_cast<int>(md.surface));
+            const bool hasTex = md.albedo.valid() && textures_.count(md.albedo.index) != 0;
+            glUniform1i(su_.hasAlbedoTex, hasTex ? 1 : 0);
+            if (hasTex) {
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, textures_[md.albedo.index].id);
+                glUniform1i(su_.albedoTex, 0);
+            }
+            if (md.cull == CullMode::None) glDisable(GL_CULL_FACE);
+            else { glEnable(GL_CULL_FACE); glCullFace(md.cull == CullMode::Front ? GL_FRONT : GL_BACK); }
+            if (md.blend == BlendMode::Opaque) glDisable(GL_BLEND);
+            else {
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA, md.blend == BlendMode::Additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+            }
+            ++stats_.stateChanges;
         }
 
         GLMesh& gm = meshIt->second;
-        glBindVertexArray(gm.vao);
+        if (gm.vao != boundVao) { glBindVertexArray(gm.vao); boundVao = gm.vao; }
 
         if (item.instanceCount > 0) {
-            glUniform1i(glGetUniformLocation(sceneShader_, "uInstanced"), 1);
+            if (boundInstanced != 1) { glUniform1i(su_.instanced, 1); boundInstanced = 1; }
             glBindBuffer(GL_ARRAY_BUFFER, gm.instanceVbo);
             glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(item.instanceCount * sizeof(InstanceData)),
                         pass.instances.data() + item.instanceStart, GL_STREAM_DRAW);
@@ -465,13 +504,12 @@ void GLDevice::executePass(const CommandBuffer::Pass& pass) {
             ++stats_.instancedDrawCalls;
             stats_.triangles += (gm.indexCount / 3) * static_cast<u32>(item.instanceCount);
         } else {
-            glUniform1i(glGetUniformLocation(sceneShader_, "uInstanced"), 0);
-            glUniformMatrix4fv(glGetUniformLocation(sceneShader_, "uModel"), 1, GL_FALSE, item.model.m);
+            if (boundInstanced != 0) { glUniform1i(su_.instanced, 0); boundInstanced = 0; }
+            glUniformMatrix4fv(su_.model, 1, GL_FALSE, item.model.m);
             glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(gm.indexCount), GL_UNSIGNED_INT, nullptr);
             ++stats_.drawCalls;
             stats_.triangles += gm.indexCount / 3;
         }
-        ++stats_.stateChanges;
     }
     glBindVertexArray(0);
 }

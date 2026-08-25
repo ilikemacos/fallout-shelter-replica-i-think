@@ -10,12 +10,12 @@ at build/runtime — nothing is copied from any existing game.
 ## Installing
 
 Download the installer from `dist/` in this repository — **its filename is
-randomised on every build**, so it will be something like `fvmalr.sh`, not a
+randomised on every build**, so it will be something like `gdyfpo.sh`, not a
 fixed name. Drop it in `~/Downloads/` and run it:
 
 ```bash
-chmod +x ~/Downloads/fvmalr.sh
-~/Downloads/fvmalr.sh
+chmod +x ~/Downloads/gdyfpo.sh
+~/Downloads/gdyfpo.sh
 ```
 
 It detects Apple Silicon and your macOS version, installs a compiler

@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+#include <chrono>
 
 #include "renderer/gl/Shaders.hpp"
 #include "renderer/Camera.hpp"
@@ -227,6 +228,7 @@ int main(int argc, char** argv) {
 
     // Concrete floor, then one block per material so every procedural
     // texture is visible in a single frame.
+    auto drawScene = [&]() {
     draw(floorMesh, Mat4::identity(), colorFromHex(0x6E6A62), 0, 0.02f, 0.92f, 0.0f);
     draw(boxMesh, Mat4::translate({-9.5f, 0, 0}), colorFromHex(0x6E6A62), 0, 0.02f, 0.92f, 0.0f);   // concrete
     draw(boxMesh, Mat4::translate({-4.7f, 0, 0}), colorFromHex(0x7E4030), 1, 0.0f, 0.9f, 0.0f);     // brick
@@ -239,8 +241,29 @@ int main(int argc, char** argv) {
          colorFromHex(0x4E5A44), 7, 0.0f, 0.9f, 0.0f);                                               // fabric
     draw(bodyMesh, Mat4::translate({6.5f, 0, 5.5f}) * Mat4::scale({1.6f,1.6f,1.6f}),
          colorFromHex(0xC98E63), 11, 0.0f, 0.68f, 0.0f);                                             // skin
+    };
+    drawScene();
 
     glFinish();
+
+    // Optional benchmark: re-render the frame N times and report the mean.
+    // This is a software rasteriser, so the absolute numbers mean nothing —
+    // but the shader executes the same arithmetic per pixel that a GPU
+    // would, so it is a sound way to compare shader variants against each
+    // other and confirm an "optimisation" actually removed work.
+    const int benchFrames = argc > 3 ? atoi(argv[3]) : 0;
+    if (benchFrames > 0) {
+        auto t0 = std::chrono::steady_clock::now();
+        for (int f = 0; f < benchFrames; ++f) {
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            drawScene();
+            glFinish();
+        }
+        auto t1 = std::chrono::steady_clock::now();
+        const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count() / benchFrames;
+        std::printf("bench: %.1f ms/frame over %d frames (%dx%d, software raster)\n",
+                    ms, benchFrames, W, H);
+    }
 
     const char* out = argc > 1 ? argv[1] : "/tmp/haven_render.ppm";
     std::FILE* f = std::fopen(out, "wb");

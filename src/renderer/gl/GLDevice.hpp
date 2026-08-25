@@ -75,6 +75,24 @@ private:
     std::unordered_map<u32, GLFramebuffer> framebuffers_;
     u32 nextTexture_ = 1, nextMesh_ = 1, nextShader_ = 1, nextMaterial_ = 1, nextFramebuffer_ = 1;
 
+    /// Uniform locations resolved once at program-link time. Looking these
+    /// up by name is a driver-side string hash; doing it per draw call (and
+    /// per light, per frame) was hundreds of lookups a frame for no reason.
+    struct SceneUniforms {
+        i32 view = -1, proj = -1, model = -1, instanced = -1;
+        i32 eyePos = -1, albedo = -1, metallic = -1, roughness = -1, emissive = -1;
+        i32 surfaceKind = -1, texScale = -1;
+        i32 ambientSky = -1, ambientGround = -1;
+        i32 exposure = -1, fogDensity = -1, fogColor = -1;
+        i32 saturation = -1, shadowTint = -1, highlightTint = -1;
+        i32 contrast = -1, vignette = -1, viewportSize = -1;
+        i32 lightCount = -1, boxCount = -1, boxMin = -1, boxMax = -1, rayTracedShadows = -1;
+        i32 hasAlbedoTex = -1, albedoTex = -1;
+        i32 lightPosType[16]{}, lightColorIntensity[16]{}, lightParams[16]{};
+    };
+    void cacheSceneUniforms();
+
+    SceneUniforms su_{};
     u32 sceneShader_ = 0;
     DeviceInfo info_;
     FrameStats stats_;

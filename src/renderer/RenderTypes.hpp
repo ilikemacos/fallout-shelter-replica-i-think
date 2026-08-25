@@ -107,6 +107,11 @@ struct MaterialDesc {
     const char* debugName = "";
 };
 
+/// Maximum occluder boxes a backend will consider when tracing shadow rays.
+/// Part of the renderer contract, so the scene layer can trim to it without
+/// reaching into a specific backend's internals.
+constexpr int kMaxOccluderBoxes = 48;
+
 enum class LightType : u8 { Directional, Point, Spot };
 struct Light {
     LightType type = LightType::Point;

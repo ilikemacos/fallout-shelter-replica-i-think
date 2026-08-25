@@ -78,6 +78,14 @@ private:
 
     struct ResidentInstance { AABB bounds; Mat4 model; u8 skinIdx; u8 outfitIdx; };
     std::vector<ResidentInstance> residentInstances_;
+
+    // Scratch buffers reused across frames. These are rebuilt every frame
+    // either way; keeping them as members means their capacity survives, so
+    // steady-state rendering does no heap allocation at all.
+    std::vector<InstanceData> scratchFloors_;
+    std::vector<InstanceData> scratchBatch_;
+    std::vector<AABB> scratchOccluders_;
+    std::vector<std::pair<u32, std::vector<InstanceData>>> scratchByMesh_;
 };
 
 } // namespace hv::scene

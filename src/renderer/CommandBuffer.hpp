@@ -28,28 +28,36 @@ struct RenderPassDesc {
 /// One logical pass: a target, a camera, some lights, some draws.
 class CommandBuffer {
 public:
-    void beginPass(const RenderPassDesc& desc) { Pass p; p.desc = desc; passes_.push_back(std::move(p)); }
+    void beginPass(const RenderPassDesc& desc) {
+        if (!retired_.empty()) {
+            passes_.push_back(std::move(retired_.back()));
+            retired_.pop_back();
+            passes_.back().desc = desc;
+        } else {
+            Pass p; p.desc = desc; passes_.push_back(std::move(p));
+        }
+    }
     void setCamera(const Mat4& view, const Mat4& proj, const Vec3& eyePos) {
         if (passes_.empty()) return;
         passes_.back().view = view;
         passes_.back().proj = proj;
         passes_.back().eye = eyePos;
     }
-    void setLights(std::vector<Light> lights) {
-        if (!passes_.empty()) passes_.back().lights = std::move(lights);
+    void setLights(const std::vector<Light>& lights) {
+        if (!passes_.empty()) passes_.back().lights = lights;
     }
     /// Coarse world boxes the ray-traced shadow pass tests against — the
     /// "box soup". Kept deliberately small (rooms, not triangles) so a
     /// per-pixel slab test over all of them stays cheap.
-    void setOccluders(std::vector<AABB> boxes) {
-        if (!passes_.empty()) passes_.back().occluders = std::move(boxes);
+    void setOccluders(const std::vector<AABB>& boxes) {
+        if (!passes_.empty()) passes_.back().occluders = boxes;
     }
     /// 0 = off, 1 = very light (sun only), 2 = low (sun + nearest fixtures).
     void setRayTracingLevel(i32 level) {
         if (!passes_.empty()) passes_.back().rayTracingLevel = level;
     }
     void draw(const DrawItem& item) { if (!passes_.empty()) passes_.back().items.push_back(item); }
-    void drawInstanced(MeshHandle mesh, MaterialHandle material, std::vector<InstanceData> instances) {
+    void drawInstanced(MeshHandle mesh, MaterialHandle material, const std::vector<InstanceData>& instances) {
         if (passes_.empty()) return;
         Pass& p = passes_.back();
         DrawItem item;
@@ -73,10 +81,24 @@ public:
         Vec3 eye;
     };
     const std::vector<Pass>& passes() const { return passes_; }
-    void reset() { passes_.clear(); }
+    /// Clears the recorded work but keeps every buffer's capacity, so a
+    /// steady-state frame records its draws without touching the heap.
+    void reset() {
+        for (Pass& p : passes_) {
+            p.items.clear();
+            p.instances.clear();
+            p.lights.clear();
+            p.occluders.clear();
+        }
+        retired_.insert(retired_.end(), std::make_move_iterator(passes_.begin()),
+                        std::make_move_iterator(passes_.end()));
+        passes_.clear();
+    }
 
 private:
     std::vector<Pass> passes_;
+    /// Emptied passes kept around so their buffers can be reused next frame.
+    std::vector<Pass> retired_;
 };
 
 } // namespace hv::gfx

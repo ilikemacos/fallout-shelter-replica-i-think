@@ -151,11 +151,17 @@ uniform int  uRayTracedShadows;   // 0 off, 1 sun only, 2 sun + nearest fixtures
 // ---------------------------------------------------------------------------
 //  Noise
 // ---------------------------------------------------------------------------
+// Integer bit-mix rather than the usual fract(sin(...)) trick. This is the
+// hottest function in the shader — every noise octave calls it 8 times and
+// worley 27 — and transcendentals are far more expensive than integer ops.
+// Only ever called with integral lattice coordinates, so the truncation is
+// exact, not a quantisation.
 vec3 hash33(vec3 p) {
-    p = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
-             dot(p, vec3(269.5, 183.3, 246.1)),
-             dot(p, vec3(113.5, 271.9, 124.6)));
-    return fract(sin(p) * 43758.5453123) * 2.0 - 1.0;
+    uvec3 q = uvec3(ivec3(floor(p)) + ivec3(0x7fffffff / 2));
+    q = q * uvec3(1597334673u, 3812015801u, 2798796415u);
+    uint n = q.x ^ q.y ^ q.z;
+    q = uvec3(n, n * 1597334673u, n * 3812015801u) * uvec3(1597334673u, 3812015801u, 2798796415u);
+    return vec3(q) * (2.0 / 4294967295.0) - 1.0;
 }
 float hash12(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -235,46 +241,54 @@ vec2 bondPattern(vec2 uv, vec2 cell, float joint) {
 // ---------------------------------------------------------------------------
 //  Height field per material — drives bump detail and cavity AO.
 // ---------------------------------------------------------------------------
-float surfaceHeight(vec3 p, vec3 n, int kind) {
+// `cheap` drops the low-frequency octaves. The bump-normal taps only need
+// the gradient, which is dominated by the high-frequency term, so they use
+// the cheap path — that is three fewer full noise stacks per pixel. The
+// albedo path uses the full version.
+float surfaceHeight(vec3 p, vec3 n, int kind, bool cheap) {
     if (kind == 0) {          // Concrete
-        return fbm(p * 1.1, 3) * 0.6 + fbm(p * 9.0, 3) * 0.4;
+        return cheap ? fbm(p * 9.0, 2)
+                     : fbm(p * 1.1, 3) * 0.6 + fbm(p * 9.0, 3) * 0.4;
     } else if (kind == 1) {   // Brick
         vec2 b = bondPattern(triCoords(p, n), vec2(0.62, 0.26), 0.035);
-        return b.x * 0.85 + fbm(p * 14.0, 2) * 0.15 + b.y * 0.05;
+        return cheap ? b.x * 0.85 + fbm(p * 14.0, 1) * 0.15
+                     : b.x * 0.85 + fbm(p * 14.0, 2) * 0.15 + b.y * 0.05;
     } else if (kind == 2) {   // Rusted metal
-        return fbm(p * 3.0, 3) * 0.5 + fbm(p * 22.0, 3) * 0.5;
+        return cheap ? fbm(p * 22.0, 2)
+                     : fbm(p * 3.0, 3) * 0.5 + fbm(p * 22.0, 3) * 0.5;
     } else if (kind == 3) {   // Painted metal
         vec2 b = bondPattern(triCoords(p, n), vec2(1.6, 1.1), 0.03);
-        return b.x * 0.7 + fbm(p * 20.0, 2) * 0.3;
+        return b.x * 0.7 + fbm(p * 20.0, cheap ? 1 : 2) * 0.3;
     } else if (kind == 4) {   // Tile
         vec2 b = bondPattern(triCoords(p, n), vec2(0.34, 0.34), 0.028);
-        return b.x * 0.9 + fbm(p * 30.0, 2) * 0.1;
+        return cheap ? b.x * 0.9 : b.x * 0.9 + fbm(p * 30.0, 2) * 0.1;
     } else if (kind == 5) {   // Brushed metal
         vec2 uv = triCoords(p, n);
-        return fbm(vec3(uv.x * 60.0, uv.y * 2.0, 0.0), 3) * 0.7 + fbm(p * 25.0, 2) * 0.3;
+        return cheap ? fbm(vec3(uv.x * 60.0, uv.y * 2.0, 0.0), 2)
+                     : fbm(vec3(uv.x * 60.0, uv.y * 2.0, 0.0), 3) * 0.7 + fbm(p * 25.0, 2) * 0.3;
     } else if (kind == 6) {   // Wood
         vec2 uv = triCoords(p, n);
-        float rings = sin(uv.y * 26.0 + fbm(p * 2.0, 3) * 7.0);
+        float rings = sin(uv.y * 26.0 + fbm(p * 2.0, cheap ? 2 : 3) * 7.0);
         return rings * 0.5 + 0.5;
     } else if (kind == 7) {   // Fabric
         vec2 uv = triCoords(p, n) * 90.0;
         return (sin(uv.x) * sin(uv.y)) * 0.5 + 0.5;
     } else if (kind == 10) {  // Dirt
-        return fbm(p * 6.0, 4);
+        return fbm(p * 6.0, cheap ? 2 : 4);
     } else if (kind == 11) {  // Skin
-        return fbm(p * 60.0, 2) * 0.5 + 0.5;
+        return fbm(p * 60.0, cheap ? 1 : 2) * 0.5 + 0.5;
     }
-    return fbm(p * 12.0, 2) * 0.5 + 0.5;   // Glass / plastic / emissive: near flat
+    return fbm(p * 12.0, cheap ? 1 : 2) * 0.5 + 0.5;   // Glass / plastic: near flat
 }
 
 /// Perturbs the geometric normal by the gradient of the height field.
 vec3 bumpNormal(vec3 n, vec3 p, int kind, float strength) {
     if (strength <= 0.0) return n;
     float e = 0.012;
-    float h  = surfaceHeight(p, n, kind);
-    float hx = surfaceHeight(p + vec3(e, 0.0, 0.0), n, kind);
-    float hy = surfaceHeight(p + vec3(0.0, e, 0.0), n, kind);
-    float hz = surfaceHeight(p + vec3(0.0, 0.0, e), n, kind);
+    float h  = surfaceHeight(p, n, kind, true);
+    float hx = surfaceHeight(p + vec3(e, 0.0, 0.0), n, kind, true);
+    float hy = surfaceHeight(p + vec3(0.0, e, 0.0), n, kind, true);
+    float hz = surfaceHeight(p + vec3(0.0, 0.0, e), n, kind, true);
     vec3 grad = vec3(hx - h, hy - h, hz - h) / e;
     grad -= n * dot(n, grad);          // keep only the tangential part
     return normalize(n - grad * strength);
@@ -287,14 +301,12 @@ struct Surface {
     float ao;
 };
 
-Surface evaluateSurface(vec3 p, vec3 n, int kind, vec3 tint) {
+Surface evaluateSurface(vec3 p, vec3 n, int kind, vec3 tint, float h) {
     Surface s;
     s.albedo = tint;
     s.roughness = uRoughness;
     s.metallic = uMetallic;
     s.ao = 1.0;
-
-    float h = surfaceHeight(p, n, kind);
 
     if (kind == 0) {                       // Concrete
         vec2 w = worley(p * 13.0);
@@ -429,12 +441,15 @@ void main() {
     vec3 V = normalize(uEyePos - vWorldPos);
 
     vec3 tint = uAlbedo * vColor.rgb * vTint.rgb;
-    Surface surf = evaluateSurface(P, Ng, uSurfaceKind, tint);
+    float height = surfaceHeight(P, Ng, uSurfaceKind, false);
+    Surface surf = evaluateSurface(P, Ng, uSurfaceKind, tint, height);
 
-    // Fade bump detail out with distance so distant geometry doesn't shimmer.
+    // Fade bump detail out with distance so distant geometry doesn't shimmer,
+    // and once it has faded, skip the three extra noise taps altogether.
     float viewDist = length(uEyePos - vWorldPos);
     float detail = 1.0 - smoothstep(18.0, 55.0, viewDist);
-    vec3 N = bumpNormal(Ng, P, uSurfaceKind, 0.06 * detail);
+    vec3 N = Ng;
+    if (detail > 0.01) N = bumpNormal(Ng, P, uSurfaceKind, 0.06 * detail);
 
     // Sky-and-bounce ambient, modulated by the material's own cavity AO.
     float up = N.y * 0.5 + 0.5;
