@@ -367,7 +367,10 @@ void GLDevice::executePass(const CommandBuffer::Pass& pass) {
     glUniformMatrix4fv(glGetUniformLocation(sceneShader_, "uView"), 1, GL_FALSE, pass.view.m);
     glUniformMatrix4fv(glGetUniformLocation(sceneShader_, "uProj"), 1, GL_FALSE, pass.proj.m);
     glUniform3f(glGetUniformLocation(sceneShader_, "uEyePos"), pass.eye.x, pass.eye.y, pass.eye.z);
-    glUniform3f(glGetUniformLocation(sceneShader_, "uAmbient"), 0.09f, 0.10f, 0.12f);
+    // A dim underground bunker still needs enough fill light to read as
+    // "dark and atmospheric" rather than "not rendering" — this is tuned
+    // against the tonemap/gamma pass in the fragment shader, not raw.
+    glUniform3f(glGetUniformLocation(sceneShader_, "uAmbient"), 0.30f, 0.32f, 0.36f);
 
     const int lightCount = std::min<int>(static_cast<int>(pass.lights.size()), shaders::kMaxLights);
     glUniform1i(glGetUniformLocation(sceneShader_, "uLightCount"), lightCount);

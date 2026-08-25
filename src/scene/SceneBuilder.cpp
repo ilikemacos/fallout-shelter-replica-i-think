@@ -141,8 +141,13 @@ void SceneRenderer::syncResidents(const std::vector<sim::Resident>& residents, f
 void SceneRenderer::render(CommandBuffer& cmd, const Frustum& frustum, const Mat4& view,
                            const Mat4& proj, const Vec3& eye, f32 dayNightT) {
     RenderPassDesc pass;
-    pass.clearColorValue = Vec4{lerpf(0.01f, 0.05f, dayNightT), lerpf(0.01f, 0.06f, dayNightT),
-                                lerpf(0.015f, 0.08f, dayNightT), 1.0f};
+    // glClear writes these values straight to the framebuffer — no shader,
+    // no gamma pass — so they're picked directly as final pixel values, not
+    // as linear light to be tonemapped. Kept low since this is bedrock
+    // beyond the dug-out rooms, not sky, but never all the way to zero so
+    // it stays visibly distinct from unlit geometry.
+    pass.clearColorValue = Vec4{lerpf(0.04f, 0.08f, dayNightT), lerpf(0.045f, 0.09f, dayNightT),
+                                lerpf(0.06f, 0.11f, dayNightT), 1.0f};
     cmd.beginPass(pass);
     cmd.setCamera(view, proj, eye);
     cmd.setLights(lighting_.nearest(eye, LightingSystem::kMaxLights));

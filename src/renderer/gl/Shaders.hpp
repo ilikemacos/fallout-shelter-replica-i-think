@@ -115,6 +115,14 @@ void main() {
         result += vec3(spec) * L.colorIntensity.rgb * L.colorIntensity.a * atten * ndotl;
     }
     result += base * uEmissive * vCustom.x;
+
+    // Tonemap + gamma-correct before writing to the (non-sRGB) default
+    // framebuffer. Without this the physically-linear lighting above —
+    // ambient around 0.3, most surfaces well under 1.0 — reads as almost
+    // solid black on screen: a linear 0.1 needs sRGB-encoding to ~0.35 to
+    // look like a dim-but-visible surface instead of "no render at all".
+    result = result / (result + vec3(1.0));
+    result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
     FragColor = vec4(result, 1.0);
 }
 )GLSL";

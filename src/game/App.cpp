@@ -236,7 +236,7 @@ void App::renderFrame(f32 dt) {
     sun.type = gfx::LightType::Directional;
     sun.direction = normalize(Vec3{0.3f, -1.0f, 0.2f});
     sun.color = Vec3{0.6f, 0.65f, 0.75f};
-    sun.intensity = 0.4f;
+    sun.intensity = 1.1f;
     sr.lighting().addLight(sun);
     for (const Room& room : world_.shelter().rooms()) {
         if (room.buildProgress < 1.0f) continue;
@@ -247,8 +247,8 @@ void App::renderFrame(f32 dt) {
         fixture.color = emergency ? Vec3{0.9f, 0.35f, 0.25f} : Vec3{1.0f, 0.78f, 0.5f};
         fixture.intensity = gfx::flickerIntensity(world_.gameTimeSeconds(), room.broken ? 6.0f : 0.0f,
                                             room.broken ? 0.6f : 0.0f, room.id) *
-                            (room.powerSatisfaction * 1.5f + 0.3f);
-        fixture.range = kCellWidth * static_cast<f32>(room.width) * 0.9f;
+                            (room.powerSatisfaction * 2.6f + 0.8f);
+        fixture.range = kCellWidth * static_cast<f32>(room.width) * 1.8f;
         sr.lighting().addLight(fixture);
     }
 
