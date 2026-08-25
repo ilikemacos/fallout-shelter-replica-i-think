@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Builds dist/iwug.sh by embedding the current source tree (as a
+# Builds dist/6767.sh by embedding the current source tree (as a
 # gzip+base64 tarball) into the installer template below. Run this whenever
 # src/, CMakeLists.txt, cmake/ or shaders/ change, and commit the result —
-# dist/iwug.sh is the actual shipped deliverable; this script is
+# dist/6767.sh is the actual shipped deliverable; this script is
 # maintainer tooling, not something an end user ever runs.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-OUT="dist/iwug.sh"
+OUT="dist/6767.sh"
 PAYLOAD_TAR="$(mktemp -t haven_payload.XXXXXX.tar.gz)"
 trap 'rm -f "$PAYLOAD_TAR"' EXIT
 
