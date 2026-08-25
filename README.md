@@ -12,11 +12,11 @@ at build/runtime — nothing is copied from any existing game.
 There is exactly one installer:
 
 ```bash
-~/Downloads/users/hyu.sh
+~/Downloads/hyu.sh
 ```
 
-Download `dist/users/hyu.sh` from this repository, put it wherever you
-like (`~/Downloads/users/` is just the expected drop location — the script
+Download `dist/hyu.sh` from this repository, put it wherever you
+like (`~/Downloads/` is just the expected drop location — the script
 works from anywhere), and run it:
 
 ```bash
@@ -36,7 +36,7 @@ script again any time to rebuild and update; your saves live under
 The installer embeds the game's full source directly in the script (as a
 compressed archive) and builds it locally, so what you get is a real,
 optimized, native arm64 build — see `scripts/make_installer.sh` if you want
-to regenerate `dist/users/hyu.sh` after changing the source.
+to regenerate `dist/hyu.sh` after changing the source.
 
 ## Building from source directly
 
@@ -84,7 +84,7 @@ for iterating on gameplay without a Mac.
 The simulation core, renderer abstraction, OpenGL backend, scene layer, and
 save system are built and unit-tested (`cmake --build && ./build/haven_tests`
 passes, including a full round-trip test of the exact source embedded in
-`dist/users/hyu.sh`). The macOS-specific window/audio/UI/app layer is
+`dist/hyu.sh`). The macOS-specific window/audio/UI/app layer is
 Cocoa/OpenGL/AudioToolbox code that cannot be compiled or run outside a real
 macOS + Xcode toolchain, so it has not been build-verified in this
 environment — run the installer on Apple Silicon hardware to build and play
