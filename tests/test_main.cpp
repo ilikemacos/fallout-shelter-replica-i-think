@@ -11,6 +11,7 @@
 #include "sim/Shelter.hpp"
 #include "gameplay/Combat.hpp"
 #include "save/SaveManager.hpp"
+#include "scene/Primitives.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -438,6 +439,54 @@ static void test_emergency_kill_count_not_duplicated() {
     CHECK(w.stats().enemiesDefeated <= 10);
 }
 
+static void test_primitive_winding_matches_normals() {
+    // Regression test: appendQuadXZ wound its triangles so the geometric
+    // (winding) normal pointed the opposite way from the vertex normal it
+    // assigned, which meant every floor slab in the game was back-face
+    // culled and simply never drawn — a large part of why the first build
+    // rendered an almost empty screen.
+    //
+    // Checks the whole class of bug: for every primitive, every triangle's
+    // winding normal must agree with its vertices' shading normals.
+    using namespace hv::scene;
+
+    auto checkAgreement = [](const MeshBuild& m, const char* what) {
+        CHECK(!m.i.empty());
+        int disagreements = 0;
+        for (size_t t = 0; t + 2 < m.i.size(); t += 3) {
+            const hv::gfx::Vertex& v0 = m.v[m.i[t]];
+            const hv::gfx::Vertex& v1 = m.v[m.i[t + 1]];
+            const hv::gfx::Vertex& v2 = m.v[m.i[t + 2]];
+            const Vec3 geo = cross(v1.position - v0.position, v2.position - v0.position);
+            if (lengthSq(geo) < 1e-12f) continue;         // degenerate, e.g. cap centres
+            const Vec3 shading = v0.normal + v1.normal + v2.normal;
+            if (lengthSq(shading) < 1e-12f) continue;
+            if (dot(normalize(geo), normalize(shading)) < 0.0f) ++disagreements;
+        }
+        if (disagreements != 0)
+            std::fprintf(stderr, "  %s: %d triangles wound against their normals\n",
+                         what, disagreements);
+        expect(disagreements == 0, what, __FILE__, __LINE__);
+    };
+
+    { MeshBuild m; appendQuadXZ(m, {0,0,0}, 10.0f, 6.0f); checkAgreement(m, "appendQuadXZ"); }
+    { MeshBuild m; appendQuadXY(m, {0,0,0}, 4.0f, 3.0f); checkAgreement(m, "appendQuadXY"); }
+    { MeshBuild m; appendBox(m, {0,0,0}, {1.0f, 2.0f, 3.0f}); checkAgreement(m, "appendBox"); }
+    { MeshBuild m; appendCylinder(m, {0,0,0}, 1.0f, 2.0f, 16); checkAgreement(m, "appendCylinder"); }
+    { MeshBuild m; appendCapsule(m, {0,0,0}, 0.4f, 2.0f, 12); checkAgreement(m, "appendCapsule"); }
+    { MeshBuild m; appendPipe(m, {0,0,0}, {2.0f,0,0}, 0.2f, 10); checkAgreement(m, "appendPipe"); }
+
+    // A floor slab must specifically face upward, since that is what the
+    // camera looks down at.
+    MeshBuild floorMesh;
+    appendQuadXZ(floorMesh, {0, 0, 0}, 10.0f, 6.0f);
+    const hv::gfx::Vertex& a = floorMesh.v[floorMesh.i[0]];
+    const hv::gfx::Vertex& b = floorMesh.v[floorMesh.i[1]];
+    const hv::gfx::Vertex& c = floorMesh.v[floorMesh.i[2]];
+    const Vec3 winding = normalize(cross(b.position - a.position, c.position - a.position));
+    CHECK(winding.y > 0.9f);
+}
+
 int main() {
     test_math();
     test_rng_determinism();
@@ -454,6 +503,7 @@ int main() {
     test_expedition_lifecycle();
     test_quest_progression();
     test_emergency_kill_count_not_duplicated();
+    test_primitive_winding_matches_normals();
 
     const char* tmp = std::getenv("TMPDIR");
     test_save_load_roundtrip(std::string(tmp ? tmp : "/tmp") + "/haven_test_saves");

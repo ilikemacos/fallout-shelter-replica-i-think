@@ -38,6 +38,16 @@ public:
     void setLights(std::vector<Light> lights) {
         if (!passes_.empty()) passes_.back().lights = std::move(lights);
     }
+    /// Coarse world boxes the ray-traced shadow pass tests against — the
+    /// "box soup". Kept deliberately small (rooms, not triangles) so a
+    /// per-pixel slab test over all of them stays cheap.
+    void setOccluders(std::vector<AABB> boxes) {
+        if (!passes_.empty()) passes_.back().occluders = std::move(boxes);
+    }
+    /// 0 = off, 1 = very light (sun only), 2 = low (sun + nearest fixtures).
+    void setRayTracingLevel(i32 level) {
+        if (!passes_.empty()) passes_.back().rayTracingLevel = level;
+    }
     void draw(const DrawItem& item) { if (!passes_.empty()) passes_.back().items.push_back(item); }
     void drawInstanced(MeshHandle mesh, MaterialHandle material, std::vector<InstanceData> instances) {
         if (passes_.empty()) return;
@@ -56,6 +66,8 @@ public:
         std::vector<DrawItem> items;
         std::vector<InstanceData> instances;
         std::vector<Light> lights;
+        std::vector<AABB> occluders;
+        i32 rayTracingLevel = 0;
         Mat4 view = Mat4::identity();
         Mat4 proj = Mat4::identity();
         Vec3 eye;

@@ -69,8 +69,13 @@ void appendCylinder(MeshBuild& m, Vec3 base, f32 radius, f32 height, int segment
                 else m.i.insert(m.i.end(), {c, c + static_cast<u32>(i) + 1, c + static_cast<u32>(i) + 2});
             }
         };
-        cap(0.0f, Vec3{0,-1,0}, true);
-        cap(height, Vec3{0,1,0}, false);
+        // Ring vertices run counter-clockwise when viewed from +Y, so the
+        // un-flipped fan winds downward: the bottom cap (normal -Y) wants it
+        // as-is and the top cap (normal +Y) is the one that must flip. Having
+        // these the other way round left both caps back-face culled, so every
+        // drum, tank and pipe end was an open hole.
+        cap(0.0f, Vec3{0,-1,0}, false);
+        cap(height, Vec3{0,1,0}, true);
     }
 }
 
@@ -120,7 +125,11 @@ void appendQuadXZ(MeshBuild& m, Vec3 center, f32 width, f32 depth, Vec2 uvT, u32
         v.uv = uvs[i]; v.color = color;
         m.v.push_back(v);
     }
-    m.i.insert(m.i.end(), {base, base+1, base+2, base, base+2, base+3});
+    // Wound counter-clockwise as seen from +Y (the direction the vertex
+    // normal points), so the lit face is the one that survives back-face
+    // culling. The naive 0-1-2 / 0-2-3 order gives the opposite winding here
+    // and makes every floor in the game invisible from above.
+    m.i.insert(m.i.end(), {base, base+2, base+1, base, base+3, base+2});
 }
 
 void appendQuadXY(MeshBuild& m, Vec3 center, f32 width, f32 height, Vec2 uvT, u32 color) {

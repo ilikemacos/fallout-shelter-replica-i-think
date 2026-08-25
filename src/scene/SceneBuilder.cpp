@@ -1,6 +1,7 @@
 #include "scene/SceneBuilder.hpp"
 #include "scene/Primitives.hpp"
 #include "core/Random.hpp"
+#include <algorithm>
 #include <cmath>
 #include <unordered_map>
 
@@ -12,10 +13,10 @@ MeshHandle upload(RenderDevice& d, MeshBuild& b, const char* name) {
 }
 
 MaterialHandle makeMaterial(RenderDevice& d, Vec3 tint, f32 metallic, f32 roughness,
-                            f32 emissive, const char* name) {
+                            f32 emissive, SurfaceKind surface, const char* name) {
     MaterialDesc m;
     m.albedoTint = tint; m.metallic = metallic; m.roughness = roughness;
-    m.emissiveStrength = emissive; m.debugName = name;
+    m.emissiveStrength = emissive; m.surface = surface; m.debugName = name;
     return d.createMaterial(m);
 }
 
@@ -52,20 +53,22 @@ MeshLibrary buildMeshLibrary(RenderDevice& device) {
       lib.lampFixture = upload(device, b, "lamp"); }
     { MeshBuild b; appendBox(b, {0,0,0}, {0.5f,0.5f,0.5f}); lib.unitCube = upload(device, b, "unit_cube"); }
 
-    lib.concrete       = makeMaterial(device, colorFromHex(0x8A8378), 0.02f, 0.92f, 0.0f, "concrete");
-    lib.rustedMetal    = makeMaterial(device, colorFromHex(0x6B4A38), 0.55f, 0.65f, 0.0f, "rusted_metal");
-    lib.paintedMetal   = makeMaterial(device, colorFromHex(0x3E4A44), 0.35f, 0.5f, 0.0f, "painted_metal");
-    lib.glassPanel     = makeMaterial(device, colorFromHex(0x86A9AE), 0.1f, 0.15f, 0.0f, "glass");
-    lib.machineHousing = makeMaterial(device, colorFromHex(0x4B4238), 0.5f, 0.55f, 0.0f, "machine_housing");
-    lib.fabricDorm     = makeMaterial(device, colorFromHex(0x5C6650), 0.0f, 0.85f, 0.0f, "fabric");
-    lib.emissivePanel  = makeMaterial(device, colorFromHex(0xE0A458), 0.0f, 0.4f, 1.6f, "emissive_panel");
+    // Each material names the procedural texture the fragment shader
+    // synthesizes for it — there are no texture files anywhere in the build.
+    lib.concrete       = makeMaterial(device, colorFromHex(0x6E6A62), 0.02f, 0.92f, 0.0f, SurfaceKind::Concrete, "concrete");
+    lib.rustedMetal    = makeMaterial(device, colorFromHex(0x7A4A2E), 0.55f, 0.65f, 0.0f, SurfaceKind::RustedMetal, "rusted_metal");
+    lib.paintedMetal   = makeMaterial(device, colorFromHex(0x3C4A42), 0.35f, 0.5f, 0.0f, SurfaceKind::PaintedMetal, "painted_metal");
+    lib.glassPanel     = makeMaterial(device, colorFromHex(0x5E7C84), 0.1f, 0.15f, 0.0f, SurfaceKind::Glass, "glass");
+    lib.machineHousing = makeMaterial(device, colorFromHex(0x53483C), 0.5f, 0.55f, 0.0f, SurfaceKind::BrushedMetal, "machine_housing");
+    lib.fabricDorm     = makeMaterial(device, colorFromHex(0x4E5A44), 0.0f, 0.85f, 0.0f, SurfaceKind::Fabric, "fabric");
+    lib.emissivePanel  = makeMaterial(device, colorFromHex(0xE0A458), 0.0f, 0.4f, 1.6f, SurfaceKind::Emissive, "emissive_panel");
 
-    static const u32 skinTones[6] = {0xC98E63, 0xE8B98A, 0x8D5A3C, 0x4A3223, 0xF2CBA0, 0x6E4530};
+    static const u32 skinTones[6] = {0xC98E63, 0xE8B98A, 0x8D5A3C, 0x6A4A33, 0xF2CBA0, 0x8A5C3E};
     for (int i = 0; i < 6; ++i)
-        lib.residentSkin[i] = makeMaterial(device, colorFromHex(skinTones[i]), 0.0f, 0.7f, 0.0f, "skin");
-    static const u32 outfitTones[4] = {0x54524A, 0x3B4A3E, 0x4A3B3B, 0x39434A};
+        lib.residentSkin[i] = makeMaterial(device, colorFromHex(skinTones[i]), 0.0f, 0.7f, 0.0f, SurfaceKind::Skin, "skin");
+    static const u32 outfitTones[4] = {0x4A483F, 0x36453A, 0x453434, 0x333D45};
     for (int i = 0; i < 4; ++i)
-        lib.residentOutfit[i] = makeMaterial(device, colorFromHex(outfitTones[i]), 0.05f, 0.75f, 0.0f, "outfit");
+        lib.residentOutfit[i] = makeMaterial(device, colorFromHex(outfitTones[i]), 0.05f, 0.75f, 0.0f, SurfaceKind::Fabric, "outfit");
 
     return lib;
 }
@@ -139,7 +142,8 @@ void SceneRenderer::syncResidents(const std::vector<sim::Resident>& residents, f
 }
 
 void SceneRenderer::render(CommandBuffer& cmd, const Frustum& frustum, const Mat4& view,
-                           const Mat4& proj, const Vec3& eye, f32 dayNightT) {
+                           const Mat4& proj, const Vec3& eye, f32 dayNightT,
+                           i32 rayTracingLevel) {
     RenderPassDesc pass;
     // glClear writes these values straight to the framebuffer — no shader,
     // no gamma pass — so they're picked directly as final pixel values, not
@@ -151,6 +155,19 @@ void SceneRenderer::render(CommandBuffer& cmd, const Frustum& frustum, const Mat
     cmd.beginPass(pass);
     cmd.setCamera(view, proj, eye);
     cmd.setLights(lighting_.nearest(eye, LightingSystem::kMaxLights));
+
+    // The shadow-ray "box soup": one coarse box per room, nearest to the
+    // camera first, since the shader only tests a bounded number of them.
+    if (rayTracingLevel > 0) {
+        std::vector<AABB> occluders;
+        occluders.reserve(roomInstances_.size());
+        for (const RoomInstance& r : roomInstances_) occluders.push_back(r.bounds);
+        std::sort(occluders.begin(), occluders.end(), [&](const AABB& a, const AABB& b) {
+            return distanceSq(a.center(), eye) < distanceSq(b.center(), eye);
+        });
+        cmd.setOccluders(std::move(occluders));
+    }
+    cmd.setRayTracingLevel(rayTracingLevel);
 
     // Floors: one flat slab per room, always drawn (cheap, establishes footing).
     std::vector<InstanceData> floors;

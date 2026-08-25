@@ -57,6 +57,10 @@ file(GLOB_RECURSE HAVEN_CORE_SRC CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/src/save/*.cpp"
   "${CMAKE_SOURCE_DIR}/src/anim/*.cpp"
 )
+# Procedural mesh generation is pure math with no GPU calls, so it lives in
+# the portable core and its geometry (winding, normals) is unit-testable
+# without a window or a GL context.
+list(APPEND HAVEN_CORE_SRC "${CMAKE_SOURCE_DIR}/src/scene/Primitives.cpp")
 add_library(haven_core STATIC ${HAVEN_CORE_SRC})
 target_include_directories(haven_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
 if(APPLE)
@@ -156,6 +160,8 @@ if(HAVEN_BUILD_APP)
     "${CMAKE_SOURCE_DIR}/src/audio/CoreAudioBackend.mm"
     "${CMAKE_SOURCE_DIR}/src/game/main.mm"
   )
+  # Primitives.cpp is already compiled into haven_core, which the app links.
+  list(REMOVE_ITEM HAVEN_APP_SRC "${CMAKE_SOURCE_DIR}/src/scene/Primitives.cpp")
   list(REMOVE_DUPLICATES HAVEN_APP_SRC)
   if(HAVEN_HAVE_VULKAN)
     # The Vulkan/MoltenVK backend (src/renderer/vk/) is not yet implemented —
@@ -225,6 +231,24 @@ if(HAVEN_BUILD_APP)
       COMMAND ${CMAKE_COMMAND} -E copy
               "${CMAKE_SOURCE_DIR}/third_party/MoltenVK/libMoltenVK.dylib"
               "$<TARGET_BUNDLE_CONTENT_DIR:Haven>/Frameworks/libMoltenVK.dylib")
+  endif()
+endif()
+
+# ---------------------------------------------------------------------------
+#  Offscreen shader preview (developer tool, Linux/CI — needs OSMesa).
+#  Renders the real shaders + real procedural meshes through a software GL
+#  context so shader and geometry regressions are catchable without a Mac.
+# ---------------------------------------------------------------------------
+option(HAVEN_BUILD_SHADER_PREVIEW "Build the offscreen OSMesa shader preview tool" OFF)
+if(HAVEN_BUILD_SHADER_PREVIEW)
+  find_library(OSMESA_LIB OSMesa)
+  find_library(GL_LIB GL)
+  if(OSMESA_LIB AND GL_LIB)
+    add_executable(haven_shader_preview "${CMAKE_SOURCE_DIR}/tools/shader_preview.cpp")
+    target_link_libraries(haven_shader_preview PRIVATE haven_core ${OSMESA_LIB} ${GL_LIB})
+    target_include_directories(haven_shader_preview PRIVATE "${CMAKE_SOURCE_DIR}/src")
+  else()
+    message(STATUS "Haven: OSMesa not found — skipping the shader preview tool")
   endif()
 endif()
 

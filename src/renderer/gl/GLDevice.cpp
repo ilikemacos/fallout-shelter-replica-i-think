@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <utility>
+#include <vector>
 
 namespace hv::gfx::gl {
 namespace {
@@ -367,16 +368,48 @@ void GLDevice::executePass(const CommandBuffer::Pass& pass) {
     glUniformMatrix4fv(glGetUniformLocation(sceneShader_, "uView"), 1, GL_FALSE, pass.view.m);
     glUniformMatrix4fv(glGetUniformLocation(sceneShader_, "uProj"), 1, GL_FALSE, pass.proj.m);
     glUniform3f(glGetUniformLocation(sceneShader_, "uEyePos"), pass.eye.x, pass.eye.y, pass.eye.z);
-    // A dim underground bunker still needs enough fill light to read as
-    // "dark and atmospheric" rather than "not rendering" — this is tuned
-    // against the tonemap/gamma pass in the fragment shader, not raw.
-    glUniform3f(glGetUniformLocation(sceneShader_, "uAmbient"), 0.52f, 0.55f, 0.60f);
-    glUniform1f(glGetUniformLocation(sceneShader_, "uExposure"), 1.6f);
-    glUniform1f(glGetUniformLocation(sceneShader_, "uFogDensity"), 0.028f);
+    // Sky-and-bounce ambient rather than one flat number: warm light down
+    // from the ceiling fixtures, cooler light bounced back up off the floor,
+    // so shadowed surfaces keep colour instead of going flat grey. Tuned
+    // against the exposure + filmic tonemap below, not as raw radiance.
+    glUniform3fv(glGetUniformLocation(sceneShader_, "uAmbientSky"), 1, shaders::kTone.ambientSky);
+    glUniform3fv(glGetUniformLocation(sceneShader_, "uAmbientGround"), 1, shaders::kTone.ambientGround);
+    glUniform1f(glGetUniformLocation(sceneShader_, "uExposure"), shaders::kTone.exposure);
+    glUniform1f(glGetUniformLocation(sceneShader_, "uFogDensity"), shaders::kTone.fogDensity);
     // Warm amber haze, matching the industrial fixture colour, rather than a
     // neutral grey — corridors recede into the shelter's own light instead
     // of a generic fog wall.
-    glUniform3f(glGetUniformLocation(sceneShader_, "uFogColor"), 0.16f, 0.13f, 0.10f);
+    glUniform3fv(glGetUniformLocation(sceneShader_, "uFogColor"), 1, shaders::kTone.fogColor);
+    glUniform1f(glGetUniformLocation(sceneShader_, "uSaturation"), shaders::kGrade.saturation);
+    glUniform3fv(glGetUniformLocation(sceneShader_, "uShadowTint"), 1, shaders::kGrade.shadowTint);
+    glUniform3fv(glGetUniformLocation(sceneShader_, "uHighlightTint"), 1, shaders::kGrade.highlightTint);
+    glUniform1f(glGetUniformLocation(sceneShader_, "uContrast"), shaders::kGrade.contrast);
+    glUniform1f(glGetUniformLocation(sceneShader_, "uVignette"), shaders::kGrade.vignette);
+    glUniform2f(glGetUniformLocation(sceneShader_, "uViewportSize"),
+                static_cast<f32>(width_), static_cast<f32>(height_));
+    // World-space frequency multiplier for the procedural textures. 1.0 means
+    // the noise/lattice scales in the shader are read directly in world units.
+    glUniform1f(glGetUniformLocation(sceneShader_, "uTexScale"), 1.0f);
+
+    // Box soup for the ray-traced shadow pass.
+    const int boxCount = std::min<int>(static_cast<int>(pass.occluders.size()), shaders::kMaxShadowBoxes);
+    glUniform1i(glGetUniformLocation(sceneShader_, "uBoxCount"), boxCount);
+    glUniform1i(glGetUniformLocation(sceneShader_, "uRayTracedShadows"), pass.rayTracingLevel);
+    if (boxCount > 0) {
+        std::vector<f32> mins(static_cast<size_t>(boxCount) * 3);
+        std::vector<f32> maxs(static_cast<size_t>(boxCount) * 3);
+        for (int i = 0; i < boxCount; ++i) {
+            const AABB& b = pass.occluders[static_cast<size_t>(i)];
+            mins[static_cast<size_t>(i) * 3 + 0] = b.min.x;
+            mins[static_cast<size_t>(i) * 3 + 1] = b.min.y;
+            mins[static_cast<size_t>(i) * 3 + 2] = b.min.z;
+            maxs[static_cast<size_t>(i) * 3 + 0] = b.max.x;
+            maxs[static_cast<size_t>(i) * 3 + 1] = b.max.y;
+            maxs[static_cast<size_t>(i) * 3 + 2] = b.max.z;
+        }
+        glUniform3fv(glGetUniformLocation(sceneShader_, "uBoxMin"), boxCount, mins.data());
+        glUniform3fv(glGetUniformLocation(sceneShader_, "uBoxMax"), boxCount, maxs.data());
+    }
 
     const int lightCount = std::min<int>(static_cast<int>(pass.lights.size()), shaders::kMaxLights);
     glUniform1i(glGetUniformLocation(sceneShader_, "uLightCount"), lightCount);
@@ -403,6 +436,7 @@ void GLDevice::executePass(const CommandBuffer::Pass& pass) {
         glUniform1f(glGetUniformLocation(sceneShader_, "uMetallic"), md.metallic);
         glUniform1f(glGetUniformLocation(sceneShader_, "uRoughness"), md.roughness);
         glUniform1f(glGetUniformLocation(sceneShader_, "uEmissive"), md.emissiveStrength);
+        glUniform1i(glGetUniformLocation(sceneShader_, "uSurfaceKind"), static_cast<int>(md.surface));
         const bool hasTex = md.albedo.valid() && textures_.count(md.albedo.index) != 0;
         glUniform1i(glGetUniformLocation(sceneShader_, "uHasAlbedoTex"), hasTex ? 1 : 0);
         if (hasTex) {

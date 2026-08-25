@@ -234,9 +234,11 @@ void App::renderFrame(f32 dt) {
     sr.lighting().beginFrame();
     gfx::Light sun;
     sun.type = gfx::LightType::Directional;
-    sun.direction = normalize(Vec3{0.3f, -1.0f, 0.2f});
-    sun.color = Vec3{0.6f, 0.65f, 0.75f};
-    sun.intensity = 1.1f;
+    sun.direction = normalize(Vec3{0.62f, -0.60f, 0.42f});
+    sun.color = Vec3{0.85f, 0.86f, 0.92f};
+    // A strong key light with low ambient is what makes the ray-traced
+    // shadows visible; a soft fill would wash them out entirely.
+    sun.intensity = 2.6f;
     sr.lighting().addLight(sun);
     for (const Room& room : world_.shelter().rooms()) {
         if (room.buildProgress < 1.0f) continue;
@@ -244,17 +246,27 @@ void App::renderFrame(f32 dt) {
         fixture.type = gfx::LightType::Point;
         fixture.position = room.worldCenter() + Vec3{0, kFloorHeight * 0.85f, 0};
         const bool emergency = room.fire > 0.05f || room.broken;
-        fixture.color = emergency ? Vec3{0.9f, 0.35f, 0.25f} : Vec3{1.0f, 0.78f, 0.5f};
+        fixture.color = emergency ? Vec3{1.0f, 0.30f, 0.18f} : Vec3{1.0f, 0.72f, 0.42f};
         fixture.intensity = gfx::flickerIntensity(world_.gameTimeSeconds(), room.broken ? 6.0f : 0.0f,
                                             room.broken ? 0.6f : 0.0f, room.id) *
-                            (room.powerSatisfaction * 2.6f + 0.8f);
+                            (room.powerSatisfaction * 4.2f + 1.0f);
         fixture.range = kCellWidth * static_cast<f32>(room.width) * 1.8f;
         sr.lighting().addLight(fixture);
     }
 
+    // Ray-traced shadows follow the graphics setting: Off, Very Light (sun
+    // only) or Low (sun + nearest fixtures). Traced per pixel in the
+    // fragment shader against the room box soup, never the whole scene.
+    i32 rtLevel = 0;
+    switch (settings_.graphics.rayTracing) {
+        case RayTracingMode::Off:       rtLevel = 0; break;
+        case RayTracingMode::VeryLight: rtLevel = 1; break;
+        case RayTracingMode::Low:       rtLevel = 2; break;
+    }
+
     gfx::CommandBuffer& cmd = device_->begin();
     sr.render(cmd, camera_.frustum(), camera_.view(), camera_.projection(), camera_.eyePosition(),
-             world_.daylight());
+             world_.daylight(), rtLevel);
     device_->submit(cmd);
 
     ui_->beginFrame(dm.pixelWidth, dm.pixelHeight, dm.backingScale);

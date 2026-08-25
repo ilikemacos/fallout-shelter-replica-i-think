@@ -59,8 +59,11 @@ public:
 
     /// Fills a CommandBuffer pass with every visible draw, culled against
     /// the given frustum.
+    /// `rayTracingLevel`: 0 = off, 1 = very light (sun shadows only),
+    /// 2 = low (sun + the nearest fixture lights).
     void render(CommandBuffer& cmd, const Frustum& frustum, const Mat4& view,
-               const Mat4& proj, const Vec3& eye, f32 dayNightT);
+               const Mat4& proj, const Vec3& eye, f32 dayNightT,
+               i32 rayTracingLevel);
 
     LightingSystem& lighting() { return lighting_; }
     const MeshLibrary& meshes() const { return meshes_; }

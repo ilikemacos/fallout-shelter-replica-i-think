@@ -69,8 +69,30 @@ struct InstanceData {
 enum class BlendMode : u8 { Opaque, AlphaBlend, Additive };
 enum class CullMode  : u8 { Back, Front, None };
 
+/// Which procedural texture the fragment shader synthesizes for a surface.
+/// Haven ships zero texture files — every material's albedo, bump detail,
+/// roughness and cavity AO is generated in-shader from world-space noise and
+/// lattice patterns, so it stays sharp at any zoom with no memory cost.
+enum class SurfaceKind : u8 {
+    Concrete = 0,   ///< poured/board-formed concrete with aggregate + staining
+    Brick,          ///< running-bond brick with recessed mortar
+    Tile,           ///< gridded ceramic/utility tile
+    RustedMetal,    ///< pitted, patchy oxidised steel
+    PaintedMetal,   ///< painted panel, chipping to bare metal on edges
+    BrushedMetal,   ///< directional brushed/machined housing
+    Wood,           ///< grain + knots
+    Fabric,         ///< woven weave
+    Glass,          ///< smooth, low roughness
+    Plastic,        ///< subtle orange-peel
+    Dirt,           ///< loose ground/grit
+    Skin,           ///< character skin, very light pore detail
+    Emissive,       ///< self-lit panel
+    Count
+};
+
 struct MaterialDesc {
     ShaderHandle shader;
+    SurfaceKind surface = SurfaceKind::Concrete;
     TextureHandle albedo;
     TextureHandle normal;
     TextureHandle metalRoughAO;

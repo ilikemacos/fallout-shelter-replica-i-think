@@ -6,3 +6,6 @@ build-*/
 compile_commands.json
 third_party/
 haven_test_saves/
+
+# The installer in dist/ is generated with a random name each build and is
+# committed as the shipped deliverable; nothing else in dist/ is tracked.
