@@ -1,0 +1,1537 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Haven: Deep Shelter</title>
+<style>
+:root{
+  --bg:#0d0e10; --panel:rgba(24,26,30,.93); --panel2:rgba(32,35,40,.95);
+  --line:#3a3f47; --text:#e7dfc9; --dim:#8b8272;
+  --amber:#e09d3b; --amber-b:#ffc45c; --good:#5fae5f; --warn:#e8a83f; --crit:#d64646;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;user-select:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+#ui{position:fixed;inset:0;pointer-events:none}
+#ui>*{pointer-events:auto}
+.pnl{background:var(--panel);border:1px solid var(--line);border-radius:5px;
+  backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
+
+/* top resource bar */
+#top{position:absolute;top:0;left:0;right:0;height:44px;display:flex;align-items:center;
+  gap:4px;padding:0 12px;background:linear-gradient(180deg,rgba(16,17,20,.97),rgba(16,17,20,.82));
+  border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+#top::-webkit-scrollbar{display:none}
+.res{display:flex;align-items:center;gap:6px;padding:3px 9px;border-radius:3px;white-space:nowrap;
+  background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.05)}
+.res .k{color:var(--dim);font-size:10px;letter-spacing:.1em}
+.res .v{font-weight:600;font-variant-numeric:tabular-nums}
+.res .d{font-size:10px;font-variant-numeric:tabular-nums}
+.up{color:var(--good)} .dn{color:var(--crit)}
+#clock{margin-left:auto;display:flex;align-items:center;gap:10px;padding-left:12px}
+#clock b{color:var(--amber-b);font-variant-numeric:tabular-nums}
+.tbtn{background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--text);
+  border-radius:3px;padding:4px 9px;cursor:pointer;font:inherit;font-size:11px}
+.tbtn:hover{background:rgba(255,255,255,.1)} .tbtn.on{background:var(--amber);color:#241a08;border-color:var(--amber)}
+
+/* build palette */
+#build{position:absolute;left:10px;top:54px;width:186px;padding:9px;max-height:calc(100% - 120px);
+  overflow-y:auto;scrollbar-width:thin}
+#build h3,#insp h3,#log h3{margin:0 0 8px;font-size:10px;letter-spacing:.2em;color:var(--amber);
+  text-transform:uppercase;font-weight:600}
+.rb{display:flex;align-items:center;gap:8px;width:100%;padding:6px 7px;margin-bottom:3px;
+  background:rgba(255,255,255,.03);border:1px solid transparent;border-radius:3px;
+  color:var(--text);font:inherit;font-size:11.5px;cursor:pointer;text-align:left}
+.rb:hover{background:rgba(255,255,255,.08);border-color:var(--line)}
+.rb.sel{background:rgba(224,157,59,.17);border-color:var(--amber)}
+.rb.locked{opacity:.36;cursor:not-allowed}
+.sw{width:11px;height:11px;border-radius:2px;flex:none;box-shadow:0 0 5px rgba(0,0,0,.5)}
+.rb .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rb .ct{color:var(--dim);font-size:10px;font-variant-numeric:tabular-nums}
+
+/* inspector */
+#insp{position:absolute;right:10px;top:54px;width:224px;padding:12px;display:none}
+#insp .t{font-size:15px;color:var(--amber-b);margin-bottom:2px}
+#insp .s{color:var(--dim);font-size:11px;margin-bottom:10px;line-height:1.45}
+.row{display:flex;justify-content:space-between;gap:8px;margin:4px 0;font-size:11.5px}
+.row span:last-child{font-variant-numeric:tabular-nums}
+.bar{height:4px;background:rgba(0,0,0,.45);border-radius:2px;overflow:hidden;margin:5px 0 9px}
+.bar i{display:block;height:100%;background:var(--amber);transition:width .25s}
+.acts{display:flex;gap:5px;margin-top:10px;flex-wrap:wrap}
+.acts button{flex:1;min-width:62px;padding:6px;font:inherit;font-size:11px;cursor:pointer;
+  border-radius:3px;border:1px solid var(--line);background:rgba(255,255,255,.06);color:var(--text)}
+.acts button:hover:not(:disabled){background:rgba(255,255,255,.13)}
+.acts button:disabled{opacity:.34;cursor:not-allowed}
+.acts button.pri{background:var(--amber);color:#241a08;border-color:var(--amber);font-weight:600}
+
+/* notifications */
+#log{position:absolute;right:10px;bottom:38px;width:270px;padding:9px;max-height:190px;overflow:hidden;display:none}
+.note{font-size:11px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05);line-height:1.45}
+.note:last-child{border:0}
+.note.good{color:var(--good)} .note.warn{color:var(--warn)} .note.crit{color:var(--crit)}
+
+/* hint bar */
+#hint{position:absolute;left:0;right:0;bottom:0;height:28px;display:flex;align-items:center;
+  padding:0 12px;gap:14px;font-size:10.5px;color:var(--dim);
+  background:linear-gradient(0deg,rgba(16,17,20,.97),rgba(16,17,20,.55));border-top:1px solid var(--line)}
+#hint b{color:var(--text);font-weight:600}
+#fps{margin-left:auto;font-variant-numeric:tabular-nums}
+
+/* build-mode banner + toast */
+#mode{position:absolute;left:50%;top:56px;transform:translateX(-50%);padding:6px 15px;
+  font-size:11.5px;display:none;white-space:nowrap}
+#mode b{color:var(--amber-b)}
+#toast{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:10px 20px;
+  font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;color:var(--crit)}
+
+/* start / help overlay */
+#ov{position:fixed;inset:0;background:rgba(8,9,11,.93);display:flex;align-items:center;
+  justify-content:center;z-index:20;backdrop-filter:blur(3px)}
+#ov .box{max-width:470px;padding:30px 34px;text-align:left}
+#ov h1{margin:0 0 4px;font-size:27px;letter-spacing:.02em}
+#ov .tag{color:var(--amber);letter-spacing:.26em;font-size:10px;text-transform:uppercase;margin-bottom:14px}
+#ov p{color:var(--dim);line-height:1.65;margin:0 0 14px;font-size:12.5px}
+#ov .keys{display:grid;grid-template-columns:auto 1fr;gap:5px 13px;font-size:11.5px;margin:14px 0 20px}
+#ov .keys b{color:var(--amber-b);font-weight:600}
+#ov .keys span{color:var(--dim)}
+#ov button{width:100%;padding:12px;font:inherit;font-weight:600;font-size:14px;cursor:pointer;
+  border-radius:4px;border:1px solid #6d5220;background:linear-gradient(180deg,var(--amber-b),var(--amber));color:#241a08}
+#ov button:hover{filter:brightness(1.09)}
+#ov .alt{background:none;border:1px solid var(--line);color:var(--text);font-weight:400;
+  margin-top:8px;font-size:12px;padding:9px}
+@media(max-width:760px){
+  #build{width:150px} #insp{width:196px} #log{display:none!important}
+  #hint{font-size:9.5px;gap:9px}
+}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="ui">
+  <div id="top"></div>
+  <div id="build" class="pnl"><h3>Construction</h3><div id="rooms"></div></div>
+  <div id="insp" class="pnl"></div>
+  <div id="log" class="pnl"><h3>Log</h3><div id="notes"></div></div>
+  <div id="mode" class="pnl"></div>
+  <div id="toast" class="pnl"></div>
+  <div id="hint">
+    <span><b>LMB</b> select/place</span>
+    <span><b>RMB/2-finger</b> orbit</span>
+    <span><b>Wheel</b> zoom</span>
+    <span><b>WASD</b> pan</span>
+    <span><b>Esc</b> cancel</span>
+    <span id="fps"></span>
+  </div>
+</div>
+<div id="ov"><div class="box">
+  <div class="tag">Original 3D shelter management</div>
+  <h1>Haven: Deep Shelter</h1>
+  <p>The blast doors are sealed. Dig out your shelter, keep power, water and
+     food flowing, and keep the people below alive.</p>
+  <p style="color:var(--dim)">Pick a room on the left, click a highlighted cell to dig it.
+     Staff it, and it starts producing. Watch the power balance.</p>
+  <div class="keys">
+    <b>LMB</b><span>Select a room, or place the one you picked</span>
+    <b>RMB / drag</b><span>Orbit the camera</span>
+    <b>Wheel</b><span>Zoom in close</span>
+    <b>WASD</b><span>Pan across the shelter</span>
+  </div>
+  <button id="play">Enter the shelter</button>
+  <button id="cont" class="alt" style="display:none">Continue saved shelter</button>
+</div></div>
+<script>
+"use strict";
+// ===========================================================================
+//  Haven: Deep Shelter — browser build.
+//  Single-file WebGL2 port of the native game. Same procedural-texture
+//  shading model (zero texture files), same filmic tonemap + colour grade,
+//  same ray-traced-shadow-against-box-soup approach, same shelter economy.
+// ===========================================================================
+
+// ---- math -----------------------------------------------------------------
+const V3 = (x=0,y=0,z=0)=>({x,y,z});
+const sub=(a,b)=>V3(a.x-b.x,a.y-b.y,a.z-b.z);
+const dot=(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
+const cross=(a,b)=>V3(a.y*b.z-a.z*b.y, a.z*b.x-a.x*b.z, a.x*b.y-a.y*b.x);
+const len=a=>Math.hypot(a.x,a.y,a.z);
+function norm(a){const l=len(a);return l>1e-8?V3(a.x/l,a.y/l,a.z/l):V3();}
+const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
+const lerp=(a,b,t)=>a+(b-a)*t;
+// Frame-rate independent exponential approach.
+const damp=(a,b,rate,dt)=>lerp(a,b,1-Math.exp(-rate*dt));
+
+function mIdent(){return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);}
+function mMul(a,b){ // column-major, returns a*b
+  const o=new Float32Array(16);
+  for(let c=0;c<4;c++)for(let r=0;r<4;r++){
+    let s=0; for(let k=0;k<4;k++) s+=a[k*4+r]*b[c*4+k];
+    o[c*4+r]=s;
+  }
+  return o;
+}
+function mTrans(x,y,z){const m=mIdent();m[12]=x;m[13]=y;m[14]=z;return m;}
+function mScale(x,y,z){const m=mIdent();m[0]=x;m[5]=y;m[10]=z;return m;}
+function mRotY(a){const m=mIdent(),c=Math.cos(a),s=Math.sin(a);m[0]=c;m[2]=-s;m[8]=s;m[10]=c;return m;}
+function mPersp(fovy,asp,zn,zf){
+  const f=1/Math.tan(fovy/2), m=new Float32Array(16);
+  m[0]=f/asp; m[5]=f; m[10]=(zf+zn)/(zn-zf); m[11]=-1; m[14]=2*zf*zn/(zn-zf);
+  return m;
+}
+function mLookAt(eye,ctr,up){
+  const f=norm(sub(ctr,eye)); let s=cross(f,up);
+  if(len(s)<1e-8) s=cross(f,V3(0,0,1));
+  s=norm(s); const u=cross(s,f); const m=mIdent();
+  m[0]=s.x;m[4]=s.y;m[8]=s.z; m[1]=u.x;m[5]=u.y;m[9]=u.z;
+  m[2]=-f.x;m[6]=-f.y;m[10]=-f.z;
+  m[12]=-dot(s,eye);m[13]=-dot(u,eye);m[14]=dot(f,eye);
+  return m;
+}
+function mInv(m){ // full inverse (needed for screen->world picking)
+  const a=m,o=new Float32Array(16);
+  o[0]=a[5]*a[10]*a[15]-a[5]*a[11]*a[14]-a[9]*a[6]*a[15]+a[9]*a[7]*a[14]+a[13]*a[6]*a[11]-a[13]*a[7]*a[10];
+  o[4]=-a[4]*a[10]*a[15]+a[4]*a[11]*a[14]+a[8]*a[6]*a[15]-a[8]*a[7]*a[14]-a[12]*a[6]*a[11]+a[12]*a[7]*a[10];
+  o[8]=a[4]*a[9]*a[15]-a[4]*a[11]*a[13]-a[8]*a[5]*a[15]+a[8]*a[7]*a[13]+a[12]*a[5]*a[11]-a[12]*a[7]*a[9];
+  o[12]=-a[4]*a[9]*a[14]+a[4]*a[10]*a[13]+a[8]*a[5]*a[14]-a[8]*a[6]*a[13]-a[12]*a[5]*a[10]+a[12]*a[6]*a[9];
+  o[1]=-a[1]*a[10]*a[15]+a[1]*a[11]*a[14]+a[9]*a[2]*a[15]-a[9]*a[3]*a[14]-a[13]*a[2]*a[11]+a[13]*a[3]*a[10];
+  o[5]=a[0]*a[10]*a[15]-a[0]*a[11]*a[14]-a[8]*a[2]*a[15]+a[8]*a[3]*a[14]+a[12]*a[2]*a[11]-a[12]*a[3]*a[10];
+  o[9]=-a[0]*a[9]*a[15]+a[0]*a[11]*a[13]+a[8]*a[1]*a[15]-a[8]*a[3]*a[13]-a[12]*a[1]*a[11]+a[12]*a[3]*a[9];
+  o[13]=a[0]*a[9]*a[14]-a[0]*a[10]*a[13]-a[8]*a[1]*a[14]+a[8]*a[2]*a[13]+a[12]*a[1]*a[10]-a[12]*a[2]*a[9];
+  o[2]=a[1]*a[6]*a[15]-a[1]*a[7]*a[14]-a[5]*a[2]*a[15]+a[5]*a[3]*a[14]+a[13]*a[2]*a[7]-a[13]*a[3]*a[6];
+  o[6]=-a[0]*a[6]*a[15]+a[0]*a[7]*a[14]+a[4]*a[2]*a[15]-a[4]*a[3]*a[14]-a[12]*a[2]*a[7]+a[12]*a[3]*a[6];
+  o[10]=a[0]*a[5]*a[15]-a[0]*a[7]*a[13]-a[4]*a[1]*a[15]+a[4]*a[3]*a[13]+a[12]*a[1]*a[7]-a[12]*a[3]*a[5];
+  o[14]=-a[0]*a[5]*a[14]+a[0]*a[6]*a[13]+a[4]*a[1]*a[14]-a[4]*a[2]*a[13]-a[12]*a[1]*a[6]+a[12]*a[2]*a[5];
+  o[3]=-a[1]*a[6]*a[11]+a[1]*a[7]*a[10]+a[5]*a[2]*a[11]-a[5]*a[3]*a[10]-a[9]*a[2]*a[7]+a[9]*a[3]*a[6];
+  o[7]=a[0]*a[6]*a[11]-a[0]*a[7]*a[10]-a[4]*a[2]*a[11]+a[4]*a[3]*a[10]+a[8]*a[2]*a[7]-a[8]*a[3]*a[6];
+  o[11]=-a[0]*a[5]*a[11]+a[0]*a[7]*a[9]+a[4]*a[1]*a[11]-a[4]*a[3]*a[9]-a[8]*a[1]*a[7]+a[8]*a[3]*a[5];
+  o[15]=a[0]*a[5]*a[10]-a[0]*a[6]*a[9]-a[4]*a[1]*a[10]+a[4]*a[2]*a[9]+a[8]*a[1]*a[6]-a[8]*a[2]*a[5];
+  let d=a[0]*o[0]+a[1]*o[4]+a[2]*o[8]+a[3]*o[12];
+  if(Math.abs(d)<1e-20) return mIdent();
+  d=1/d; for(let i=0;i<16;i++) o[i]*=d;
+  return o;
+}
+// sRGB hex -> linear, matching colorFromHex() in the native build.
+function hexLin(h){
+  const ch=v=>{const s=v/255; return s<=0.04045? s/12.92 : Math.pow((s+0.055)/1.055,2.4);};
+  return [ch((h>>16)&255), ch((h>>8)&255), ch(h&255)];
+}
+const hexCss=h=>'#'+h.toString(16).padStart(6,'0');
+
+// deterministic PRNG (mulberry32) so a seed reproduces a shelter
+function makeRng(seed){
+  let a=seed>>>0;
+  return function(){
+    a=(a+0x6D2B79F5)>>>0;
+    let t=Math.imul(a^(a>>>15),1|a);
+    t=(t+Math.imul(t^(t>>>7),61|t))^t;
+    return ((t^(t>>>14))>>>0)/4294967296;
+  };
+}
+
+// ---- shaders (GLSL ES 3.00 port of the native GLSL 4.10) -------------------
+const MAX_LIGHTS = 8;
+const MAX_BOXES  = 32;
+
+const SCENE_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNrm;
+layout(location=2) in vec2 aUV;
+layout(location=3) in vec4 iM0;
+layout(location=4) in vec4 iM1;
+layout(location=5) in vec4 iM2;
+layout(location=6) in vec4 iM3;
+layout(location=7) in vec4 iTint;
+uniform mat4 uView, uProj;
+out vec3 vWorld; out vec3 vNrm; out vec2 vUV; out vec4 vTint;
+void main(){
+  mat4 model = mat4(iM0,iM1,iM2,iM3);
+  vec4 w = model * vec4(aPos,1.0);
+  vWorld = w.xyz;
+  vNrm = mat3(model) * aNrm;
+  vUV = aUV; vTint = iTint;
+  gl_Position = uProj * uView * w;
+}`;
+
+const SCENE_FS = `#version 300 es
+precision highp float;
+precision highp int;
+in vec3 vWorld; in vec3 vNrm; in vec2 vUV; in vec4 vTint;
+out vec4 frag;
+
+uniform vec3 uEye, uAlbedo, uAmbSky, uAmbGnd, uFogCol, uShadowTint, uHighTint;
+uniform float uMetallic, uRoughness, uEmissive, uExposure, uFogDensity;
+uniform float uSaturation, uContrast, uVignette;
+uniform vec2 uViewport;
+uniform int uSurfaceKind, uLightCount, uBoxCount, uRayShadows;
+uniform vec4 uLightPT[${MAX_LIGHTS}];   // xyz pos/-dir, w type (0 dir,1 point)
+uniform vec4 uLightCI[${MAX_LIGHTS}];   // rgb colour, a intensity
+uniform vec4 uLightPar[${MAX_LIGHTS}];  // x range
+uniform vec3 uBoxMin[${MAX_BOXES}];
+uniform vec3 uBoxMax[${MAX_BOXES}];
+
+// Integer bit-mix hash. Only ever fed integral lattice coords, and far
+// cheaper than the usual fract(sin(...)) — it is the hottest function here.
+vec3 hash33(vec3 p){
+  uvec3 q = uvec3(ivec3(floor(p)) + ivec3(1073741823));
+  q = q * uvec3(1597334673u, 3812015801u, 2798796415u);
+  uint n = q.x ^ q.y ^ q.z;
+  q = uvec3(n, n*1597334673u, n*3812015801u) * uvec3(1597334673u,3812015801u,2798796415u);
+  return vec3(q) * (2.0/4294967295.0) - 1.0;
+}
+float hash12(vec2 p){
+  vec3 p3 = fract(vec3(p.xyx)*0.1031);
+  p3 += dot(p3, p3.yzx+33.33);
+  return fract((p3.x+p3.y)*p3.z);
+}
+float gnoise(vec3 p){
+  vec3 i=floor(p), f=fract(p), u=f*f*(3.0-2.0*f);
+  return mix(mix(mix(dot(hash33(i+vec3(0,0,0)), f-vec3(0,0,0)),
+                     dot(hash33(i+vec3(1,0,0)), f-vec3(1,0,0)), u.x),
+                 mix(dot(hash33(i+vec3(0,1,0)), f-vec3(0,1,0)),
+                     dot(hash33(i+vec3(1,1,0)), f-vec3(1,1,0)), u.x), u.y),
+             mix(mix(dot(hash33(i+vec3(0,0,1)), f-vec3(0,0,1)),
+                     dot(hash33(i+vec3(1,0,1)), f-vec3(1,0,1)), u.x),
+                 mix(dot(hash33(i+vec3(0,1,1)), f-vec3(0,1,1)),
+                     dot(hash33(i+vec3(1,1,1)), f-vec3(1,1,1)), u.x), u.y), u.z);
+}
+float fbm(vec3 p, int oct){
+  float s=0.0, a=0.5, n=0.0;
+  for(int i=0;i<5;i++){
+    if(i>=oct) break;
+    s += gnoise(p)*a; n += a; p = p*2.03 + vec3(11.3,7.1,5.7); a *= 0.5;
+  }
+  return s/max(n,1e-4);
+}
+vec2 worley(vec3 p){
+  vec3 i=floor(p), f=fract(p);
+  float f1=8.0,f2=8.0;
+  for(int x=-1;x<=1;x++)for(int y=-1;y<=1;y++)for(int z=-1;z<=1;z++){
+    vec3 g=vec3(x,y,z);
+    float d=length(g + (hash33(i+g)*0.5+0.5) - f);
+    if(d<f1){f2=f1;f1=d;} else if(d<f2) f2=d;
+  }
+  return vec2(f1,f2);
+}
+vec2 triCoords(vec3 p, vec3 n){
+  vec3 w = pow(abs(n), vec3(6.0));
+  w /= max(w.x+w.y+w.z, 1e-4);
+  return w.x>max(w.y,w.z) ? p.zy : (w.y>w.z ? p.xz : p.xy);
+}
+// running-bond lattice -> (face mask, per-unit hash)
+vec2 bond(vec2 uv, vec2 cell, float joint){
+  uv /= cell;
+  float row = floor(uv.y);
+  uv.x += 0.5*mod(row,2.0);
+  vec2 id=floor(uv), f=fract(uv);
+  vec2 d = min(f,1.0-f)*cell;
+  return vec2(smoothstep(0.0,joint,min(d.x,d.y)), hash12(id+row*0.37));
+}
+// 'cheap' keeps only the high-frequency octaves, which is all the bump
+// gradient depends on — three fewer full noise stacks per pixel.
+float height(vec3 p, vec3 n, int kind, bool cheap){
+  if(kind==0) return cheap? fbm(p*9.0,2) : fbm(p*1.1,3)*0.6 + fbm(p*9.0,3)*0.4;
+  else if(kind==1){ vec2 b=bond(triCoords(p,n),vec2(0.62,0.26),0.035);
+    return cheap? b.x*0.85+fbm(p*14.0,1)*0.15 : b.x*0.85+fbm(p*14.0,2)*0.15+b.y*0.05; }
+  else if(kind==2) return cheap? fbm(p*22.0,2) : fbm(p*3.0,3)*0.5 + fbm(p*22.0,3)*0.5;
+  else if(kind==3){ vec2 b=bond(triCoords(p,n),vec2(1.6,1.1),0.03);
+    return b.x*0.7 + fbm(p*20.0, cheap?1:2)*0.3; }
+  else if(kind==4){ vec2 b=bond(triCoords(p,n),vec2(0.34,0.34),0.028);
+    return cheap? b.x*0.9 : b.x*0.9+fbm(p*30.0,2)*0.1; }
+  else if(kind==5){ vec2 uv=triCoords(p,n);
+    return cheap? fbm(vec3(uv.x*60.0,uv.y*2.0,0.0),2)
+                : fbm(vec3(uv.x*60.0,uv.y*2.0,0.0),3)*0.7 + fbm(p*25.0,2)*0.3; }
+  else if(kind==6){ vec2 uv=triCoords(p,n);
+    return sin(uv.y*26.0 + fbm(p*2.0, cheap?2:3)*7.0)*0.5+0.5; }
+  else if(kind==7){ vec2 uv=triCoords(p,n)*90.0; return sin(uv.x)*sin(uv.y)*0.5+0.5; }
+  else if(kind==11) return fbm(p*60.0, cheap?1:2)*0.5+0.5;
+  return fbm(p*12.0, cheap?1:2)*0.5+0.5;
+}
+vec3 bumpNormal(vec3 n, vec3 p, int kind, float strength){
+  if(strength<=0.0) return n;
+  float e=0.012;
+  float h  = height(p,n,kind,true);
+  float hx = height(p+vec3(e,0,0),n,kind,true);
+  float hy = height(p+vec3(0,e,0),n,kind,true);
+  float hz = height(p+vec3(0,0,e),n,kind,true);
+  vec3 g = vec3(hx-h,hy-h,hz-h)/e;
+  g -= n*dot(n,g);
+  return normalize(n - g*strength);
+}
+bool insideBox(vec3 p, vec3 lo, vec3 hi){
+  return all(greaterThanEqual(p,lo)) && all(lessThanEqual(p,hi));
+}
+// slab test; a zero direction component yields +/-inf, which min/max handle
+bool slabHit(vec3 ro, vec3 rd, vec3 lo, vec3 hi, float maxT){
+  vec3 inv = 1.0/rd;
+  vec3 t0=(lo-ro)*inv, t1=(hi-ro)*inv;
+  vec3 ts=min(t0,t1), tb=max(t0,t1);
+  float tmin=max(max(ts.x,ts.y),ts.z), tmax=min(min(tb.x,tb.y),tb.z);
+  return tmax>=max(tmin,0.0) && tmin<maxT;
+}
+float traceShadow(vec3 o, vec3 d, float maxT){
+  for(int i=0;i<${MAX_BOXES};i++){
+    if(i>=uBoxCount) break;
+    vec3 lo=uBoxMin[i], hi=uBoxMax[i];
+    if(insideBox(o, lo-vec3(0.05), hi+vec3(0.05))) continue;
+    if(slabHit(o,d,lo,hi,maxT)) return 0.0;
+  }
+  return 1.0;
+}
+vec3 aces(vec3 x){
+  return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0);
+}
+void main(){
+  vec3 Ng=normalize(vNrm), P=vWorld, V=normalize(uEye-vWorld);
+  vec3 tint = uAlbedo * vTint.rgb;
+  int kind = uSurfaceKind;
+
+  float h = height(P,Ng,kind,false);
+  vec3 albedo=tint; float rough=uRoughness, metal=uMetallic, ao=1.0;
+
+  if(kind==0){                                   // concrete
+    vec2 w=worley(P*13.0);
+    float agg=smoothstep(0.22,0.0,w.x);
+    float stain=smoothstep(0.15,0.75, fbm(P*0.8,4)*0.5+0.5);
+    float grime=smoothstep(0.6,0.0,h);
+    albedo = tint*(0.68+0.44*h);
+    albedo = mix(albedo, tint*1.18, agg*0.40);
+    albedo = mix(albedo, tint*vec3(0.55,0.54,0.52), stain*0.5);
+    albedo *= 1.0-grime*0.34;
+    rough = clamp(0.86+0.12*h-agg*0.15,0.05,1.0);
+    ao = 1.0-grime*0.6;
+  } else if(kind==1){                            // brick
+    vec2 b=bond(triCoords(P,Ng),vec2(0.62,0.26),0.035);
+    vec3 br=tint*(0.72+0.55*b.y)*(0.85+0.3*fbm(P*18.0,3));
+    albedo=mix(vec3(0.44,0.43,0.40)*(0.8+0.4*fbm(P*25.0,2)), br, b.x);
+    rough=mix(0.95,0.82,b.x); ao=mix(0.55,1.0,b.x);
+  } else if(kind==2){                            // rusted metal
+    float ox=smoothstep(0.25,0.75, fbm(P*2.4,4)*0.5+0.5);
+    float pit=smoothstep(0.28,0.0, worley(P*20.0).x);
+    albedo=mix(vec3(0.38,0.39,0.42), tint*vec3(1.15,0.62,0.32), clamp(ox+pit*0.5,0.0,1.0));
+    albedo*=0.75+0.5*h; metal=mix(0.85,0.08,ox); rough=mix(0.38,0.95,ox); ao=1.0-pit*0.4;
+  } else if(kind==3){                            // painted metal, chipping
+    vec2 b=bond(triCoords(P,Ng),vec2(1.6,1.1),0.03);
+    float wear=smoothstep(0.55,0.95, fbm(P*7.0,4)*0.5+0.5);
+    albedo=mix(tint*(0.9+0.25*fbm(P*16.0,2)), vec3(0.40,0.41,0.44), wear*0.8);
+    albedo=mix(albedo*0.5, albedo, b.x);
+    metal=mix(0.15,0.8,wear); rough=mix(0.55,0.42,wear); ao=mix(0.6,1.0,b.x);
+  } else if(kind==4){                            // tile
+    vec2 b=bond(triCoords(P,Ng),vec2(0.34,0.34),0.028);
+    albedo=mix(vec3(0.5,0.49,0.46), tint*(0.85+0.3*b.y), b.x);
+    rough=mix(0.9,0.28,b.x); ao=mix(0.6,1.0,b.x);
+  } else if(kind==5){                            // brushed metal
+    albedo=tint*(0.8+0.35*h); metal=0.85; rough=clamp(0.30+0.25*h,0.05,1.0);
+  } else if(kind==6){                            // wood
+    float knot=smoothstep(0.72,1.0, fbm(P*3.5,3)*0.5+0.5);
+    albedo=mix(tint*(0.62+0.5*h), tint*0.42, knot);
+    rough=0.78-0.1*h; ao=1.0-knot*0.3;
+  } else if(kind==7){                            // fabric
+    albedo=tint*(0.75+0.35*h); rough=0.95; ao=0.85+0.15*h;
+  } else if(kind==8){ albedo=tint; rough=0.06; }
+  else if(kind==11){ albedo=tint*(0.94+0.1*h); rough=0.68; }
+  else if(kind==12){ albedo=tint; rough=0.35; }
+
+  float viewDist=length(uEye-vWorld);
+  float detail=1.0-smoothstep(18.0,55.0,viewDist);
+  vec3 N = detail>0.01 ? bumpNormal(Ng,P,kind,0.028*detail) : Ng;
+
+  // sky-and-bounce ambient, not one flat number
+  vec3 result = albedo * mix(uAmbGnd, uAmbSky, N.y*0.5+0.5) * ao;
+
+  for(int i=0;i<${MAX_LIGHTS};i++){
+    if(i>=uLightCount) break;
+    bool dir = uLightPT[i].w < 0.5;
+    vec3 L; float atten=1.0, maxT;
+    if(dir){ L=normalize(-uLightPT[i].xyz); maxT=1e4; }
+    else{
+      vec3 d=uLightPT[i].xyz-vWorld; float dist=length(d);
+      L=d/max(dist,1e-4);
+      atten=clamp(1.0-dist/max(uLightPar[i].x,1e-3),0.0,1.0); atten*=atten;
+      maxT=dist;
+    }
+    float ndl=max(dot(N,L),0.0);
+    if(ndl<=0.0||atten<=0.0) continue;
+    float sh=1.0;
+    if(uRayShadows>0 && (dir || (uRayShadows>1 && i<2)))
+      sh = traceShadow(vWorld+Ng*0.06, L, maxT-0.12);
+    if(sh<=0.0) continue;
+    vec3 rad = uLightCI[i].rgb*uLightCI[i].a*atten*sh;
+    float spec = pow(max(dot(N,normalize(L+V)),0.0), mix(8.0,220.0,1.0-rough))*(0.25+metal*0.9);
+    result += albedo*rad*ndl + mix(vec3(spec), albedo*spec, metal)*rad*ndl;
+  }
+  result += albedo*uEmissive*vTint.a;
+
+  float fog=1.0-exp(-viewDist*uFogDensity);
+  result=mix(result, uFogCol, clamp(fog,0.0,0.85));
+
+  result *= uExposure;
+  result = aces(result);
+  float luma=dot(result, vec3(0.2126,0.7152,0.0722));
+  result *= mix(uShadowTint, uHighTint, smoothstep(0.15,0.75,luma));
+  result = mix(vec3(luma), result, uSaturation);
+  result = clamp((result-0.5)*uContrast+0.5, 0.0, 1.0);
+  vec2 ndc = gl_FragCoord.xy/max(uViewport,vec2(1.0)) - 0.5;
+  result *= clamp(1.0-dot(ndc,ndc)*uVignette, 0.0, 1.0);
+  frag = vec4(pow(max(result,vec3(0.0)), vec3(1.0/2.2)), 1.0);
+}`;
+
+// tone + grade constants, mirroring the native build's kTone / kGrade
+const TONE = {
+  exposure:1.28, ambSky:[0.265,0.238,0.205], ambGnd:[0.105,0.112,0.132],
+  fogDensity:0.026, fogCol:[0.075,0.066,0.056],
+  saturation:0.92, shadowTint:[0.90,0.98,1.10], highTint:[1.10,1.02,0.88],
+  contrast:1.07, vignette:0.22,
+};
+</script>
+<script>
+"use strict";
+// ---- procedural meshes ----------------------------------------------------
+// Vertex layout: px,py,pz, nx,ny,nz, u,v  (8 floats)
+function MB(){ return {v:[], i:[]}; }
+function pushV(m,p,n,uv){ m.v.push(p[0],p[1],p[2], n[0],n[1],n[2], uv[0],uv[1]); }
+
+function addBox(m,c,h,uvT){
+  uvT=uvT||[1,1];
+  const faces=[
+    {n:[1,0,0],  u:[0,0,-1], v:[0,1,0]}, {n:[-1,0,0], u:[0,0,1],  v:[0,1,0]},
+    {n:[0,1,0],  u:[1,0,0],  v:[0,0,-1]},{n:[0,-1,0], u:[1,0,0],  v:[0,0,1]},
+    {n:[0,0,1],  u:[1,0,0],  v:[0,1,0]}, {n:[0,0,-1], u:[-1,0,0], v:[0,1,0]},
+  ];
+  for(const f of faces){
+    const base=m.v.length/8;
+    const ctr=[c[0]+f.n[0]*h[0], c[1]+f.n[1]*h[1], c[2]+f.n[2]*h[2]];
+    const eu = f.n[0]!==0 ? h[2] : h[0];
+    const ev = f.n[1]!==0 ? h[2] : h[1];
+    const uvs=[[0,0],[uvT[0],0],[uvT[0],uvT[1]],[0,uvT[1]]];
+    const signs=[[-1,-1],[1,-1],[1,1],[-1,1]];
+    for(let k=0;k<4;k++){
+      const s=signs[k];
+      pushV(m,[ctr[0]+f.u[0]*eu*s[0]+f.v[0]*ev*s[1],
+               ctr[1]+f.u[1]*eu*s[0]+f.v[1]*ev*s[1],
+               ctr[2]+f.u[2]*eu*s[0]+f.v[2]*ev*s[1]], f.n, uvs[k]);
+    }
+    m.i.push(base,base+1,base+2, base,base+2,base+3);
+  }
+}
+function addQuadXZ(m,c,w,d,uvT){
+  uvT=uvT||[1,1];
+  const base=m.v.length/8, hw=w/2, hd=d/2;
+  const pts=[[-hw,0,-hd],[hw,0,-hd],[hw,0,hd],[-hw,0,hd]];
+  const uvs=[[0,0],[uvT[0],0],[uvT[0],uvT[1]],[0,uvT[1]]];
+  for(let k=0;k<4;k++) pushV(m,[c[0]+pts[k][0],c[1]+pts[k][1],c[2]+pts[k][2]],[0,1,0],uvs[k]);
+  // Wound CCW as seen from +Y (the way the normal points) so the lit face
+  // survives back-face culling — the naive 0,1,2 order faces downward and
+  // makes every floor invisible from above.
+  m.i.push(base,base+2,base+1, base,base+3,base+2);
+}
+function addCyl(m,base_,r,hgt,seg,caps){
+  caps = caps!==false;
+  const start=m.v.length/8;
+  for(let i=0;i<=seg;i++){
+    const t=i/seg, a=t*Math.PI*2, n=[Math.cos(a),0,Math.sin(a)];
+    for(let y=0;y<2;y++)
+      pushV(m,[base_[0]+n[0]*r, base_[1]+hgt*y, base_[2]+n[2]*r], n, [t*4,y]);
+  }
+  for(let i=0;i<seg;i++){
+    const a=start+i*2, b=a+2;
+    m.i.push(a,a+1,b, b,a+1,b+1);
+  }
+  if(caps){
+    const cap=(y,n,flip)=>{
+      const c=m.v.length/8;
+      pushV(m,[base_[0],base_[1]+y,base_[2]],n,[0.5,0.5]);
+      for(let i=0;i<=seg;i++){
+        const a=i/seg*Math.PI*2;
+        pushV(m,[base_[0]+Math.cos(a)*r, base_[1]+y, base_[2]+Math.sin(a)*r], n,
+              [Math.cos(a)*0.5+0.5, Math.sin(a)*0.5+0.5]);
+      }
+      for(let i=0;i<seg;i++){
+        if(flip) m.i.push(c, c+i+2, c+i+1); else m.i.push(c, c+i+1, c+i+2);
+      }
+    };
+    // Ring runs CCW from +Y, so the un-flipped fan faces down: bottom keeps
+    // it, top must flip. Getting this backwards leaves both caps culled.
+    cap(0,[0,-1,0],false);
+    cap(hgt,[0,1,0],true);
+  }
+}
+function addCapsule(m,base_,r,hgt,seg){
+  const rings=Math.max(2,seg>>1), cyl=Math.max(0,hgt-r*2), cb=[base_[0],base_[1]+r,base_[2]];
+  const hemi=(o,sign)=>{
+    const start=m.v.length/8;
+    for(let ri=0;ri<=rings;ri++){
+      const phi=ri/rings*Math.PI/2, y=Math.sin(phi)*r*sign, rr=Math.cos(phi)*r;
+      for(let i=0;i<=seg;i++){
+        const a=i/seg*Math.PI*2;
+        pushV(m,[o[0]+Math.cos(a)*rr, o[1]+y, o[2]+Math.sin(a)*rr],
+              [Math.cos(a)*Math.cos(phi), Math.sin(phi)*sign, Math.sin(a)*Math.cos(phi)],
+              [i/seg, ri/rings]);
+      }
+    }
+    for(let ri=0;ri<rings;ri++)for(let i=0;i<seg;i++){
+      const a=start+ri*(seg+1)+i, b=a+seg+1;
+      if(sign>0) m.i.push(a,b,a+1, a+1,b,b+1); else m.i.push(a,a+1,b, a+1,b+1,b);
+    }
+  };
+  hemi(cb,1); hemi([cb[0],cb[1]+cyl,cb[2]],-1);
+  addCyl(m,cb,r,cyl,seg,false);
+}
+
+// ---- simulation -----------------------------------------------------------
+const COLS=16, FLOORS=8, CW=6.0, FH=4.6, RD=7.0;
+const R_POWER=0,R_WATER=1,R_FOOD=2,R_MAT=3,R_MED=4,R_SCRIP=5;
+const RES=[
+  {k:'PWR', n:'Power',     c:0xE0A33B},
+  {k:'H2O', n:'Water',     c:0x5C93A6},
+  {k:'FOOD',n:'Food',      c:0x6F9950},
+  {k:'MAT', n:'Materials', c:0x9A8F7E},
+  {k:'MED', n:'Medicine',  c:0xC85F5F},
+  {k:'SCRP',n:'Scrip',     c:0xC0A24A},
+];
+// surface kinds match the shader's uSurfaceKind switch
+const SK={CONCRETE:0,BRICK:1,RUST:2,PAINTED:3,TILE:4,BRUSHED:5,WOOD:6,FABRIC:7,GLASS:8,SKIN:11,EMISSIVE:12};
+
+const ROOMS=[
+ {id:'elevator',  name:'Elevator',    w:1, cost:45,  slots:0, power:1.5, prod:-1, rate:0,
+  col:0x6A5C4C, sk:SK.BRUSHED, mesh:'lift',  pop:0,  desc:'Freight lift. Lets you dig the floor below.'},
+ {id:'corridor',  name:'Corridor',    w:1, cost:15,  slots:0, power:0.3, prod:-1, rate:0,
+  col:0x8A8378, sk:SK.CONCRETE,mesh:'none',  pop:0,  desc:'Bare passage. Cheap way to spread sideways.'},
+ {id:'generator', name:'Generator',   w:3, cost:110, slots:3, power:0,   prod:R_POWER, rate:26,
+  col:0xC97B3B, sk:SK.RUST,    mesh:'drum',  pop:0,  desc:'Diesel sets. Everything downstream needs them.'},
+ {id:'water',     name:'Water Plant', w:3, cost:120, slots:3, power:7,   prod:R_WATER, rate:19,
+  col:0x5C93A6, sk:SK.PAINTED, mesh:'tank',  pop:0,  desc:'Sand filters and a chlorination stack.'},
+ {id:'hydro',     name:'Hydroponics', w:3, cost:120, slots:3, power:8,   prod:R_FOOD,  rate:18,
+  col:0x6F9950, sk:SK.PAINTED, mesh:'rack',  pop:0,  desc:'Grow racks under sodium lamps.'},
+ {id:'dorm',      name:'Dormitory',   w:3, cost:80,  slots:0, power:2.5, prod:-1, rate:0,
+  col:0x5C6650, sk:SK.FABRIC,  mesh:'bunk',  pop:0,  desc:'Bunks. Raises how many people you can house.'},
+ {id:'diner',     name:'Mess Hall',   w:3, cost:90,  slots:2, power:3,   prod:-1, rate:0,
+  col:0xB08A4A, sk:SK.TILE,    mesh:'bench', pop:6,  desc:'Steel tables. Lifts morale.', morale:5},
+ {id:'store',     name:'Store Room',  w:2, cost:70,  slots:1, power:1,   prod:-1, rate:0,
+  col:0x8A7F6A, sk:SK.WOOD,    mesh:'crate', pop:0,  desc:'Pallet racking. Raises storage capacity.', store:260},
+ {id:'workshop',  name:'Workshop',    w:3, cost:130, slots:3, power:9,   prod:R_MAT,  rate:12,
+  col:0x7A6A55, sk:SK.BRUSHED, mesh:'bench', pop:8,  desc:'Lathe and press. Turns salvage into materials.'},
+ {id:'medbay',    name:'Infirmary',   w:2, cost:140, slots:2, power:6,   prod:R_MED,  rate:4.5,
+  col:0xC85F5F, sk:SK.TILE,    mesh:'bed',   pop:8,  desc:'Two beds and a locked cabinet. Heals the hurt.'},
+ {id:'radio',     name:'Signals',     w:2, cost:170, slots:2, power:7,   prod:R_SCRIP,rate:5,
+  col:0xB0A050, sk:SK.PAINTED, mesh:'desk',  pop:12, desc:'Valve transmitter. Draws newcomers and trade.'},
+ {id:'rec',       name:'Rec Room',    w:2, cost:100, slots:1, power:3.5, prod:-1, rate:0,
+  col:0x8A5FA0, sk:SK.BRICK,   mesh:'bench', pop:10, desc:'Cards and a radio. Strong morale boost.', morale:9},
+];
+const roomDef=id=>ROOMS.find(r=>r.id===id);
+
+const FIRST=['Alma','Bea','Cora','Dessa','Elin','Faye','Greta','Hollis','Imogen','Junia','Kestrel','Lark','Mave','Nessa','Abel','Boone','Cassius','Dorn','Ewan','Fisk','Gareth','Ivor','Jonas','Kade','Lem','Niall','Osric','Pike','Silas','Tam','Vance','Roald'];
+const LAST=['Ashgrove','Bellwether','Calloway','Draysen','Ebbot','Farrowgate','Glasswell','Hollowick','Ironhale','Jessup','Lampwright','Marrowfield','Northgate','Oakhelm','Pellerin','Redlantern','Stonecarve','Thackery','Underhill','Varrick','Weatherly','Mercer','Prentiss','Sedgewick'];
+
+function makeWorld(seed){
+  const rng=makeRng(seed);
+  const w={
+    seed, rng, time:0, day:1, speed:1, paused:false,
+    res:[90,180,180,420,25,260],
+    cap:[200,320,320,400,120,1500],
+    rooms:[], nextRoom:1, people:[], nextPerson:1,
+    notes:[], flow:[0,0,0,0,0,0], prod:[0,0,0,0,0,0], cons:[0,0,0,0,0,0],
+    powerSat:1, sinceEvent:60, built:0,
+  };
+  // starter: airlock + one elevator, mirroring the native createStarter()
+  w.rooms.push({id:w.nextRoom++, def:'corridor', floor:0, col:COLS/2-1, w:2,
+                lvl:1, cond:1, staff:[], progress:1, broken:false, anim:Math.random()*6, entrance:true});
+  w.rooms.push({id:w.nextRoom++, def:'elevator', floor:0, col:COLS/2+1, w:1,
+                lvl:1, cond:1, staff:[], progress:1, broken:false, anim:Math.random()*6});
+  for(let i=0;i<6;i++) w.people.push(makePerson(w));
+  recalcCaps(w);
+  note(w,'The blast doors seal behind you.','');
+  return w;
+}
+function makePerson(w){
+  const r=w.rng;
+  const p={
+    id:w.nextPerson++,
+    name:FIRST[(r()*FIRST.length)|0]+' '+LAST[(r()*LAST.length)|0],
+    skill:1+Math.floor(r()*6), health:100, happy:62+r()*16, energy:70+r()*30,
+    hunger:r()*20, thirst:r()*20, job:0,
+    pos:V3((COLS/2-1-(COLS-1)/2)*CW, 0, 0), target:null, facing:0,
+    skin:(r()*6)|0, phase:r()*6.28,
+  };
+  return p;
+}
+function note(w,text,cls){
+  w.notes.unshift({text,cls:cls||'',t:w.time});
+  if(w.notes.length>40) w.notes.pop();
+  uiNotesDirty=true;
+}
+function cellFree(w,floor,col,width,ignoreId){
+  if(floor<0||floor>=FLOORS||col<0||col+width>COLS) return false;
+  for(const r of w.rooms){
+    if(r.id===ignoreId) continue;
+    if(r.floor!==floor) continue;
+    if(col < r.col+r.w && r.col < col+width) return false;
+  }
+  return true;
+}
+function roomAt(w,floor,col){
+  return w.rooms.find(r=>r.floor===floor && col>=r.col && col<r.col+r.w) || null;
+}
+// A placement must touch existing structure, and a new floor needs an
+// elevator reaching it before anything but another elevator can go there.
+function canBuild(w,def,floor,col){
+  const d=roomDef(def);
+  if(!cellFree(w,floor,col,d.w)) return 'occupied';
+  if(population(w) < d.pop) return 'needs '+d.pop+' residents';
+  if(cost(w,d,floor) > w.res[R_MAT]) return 'not enough materials';
+  let touches=false;
+  for(let i=0;i<d.w && !touches;i++){
+    const c=col+i;
+    if(roomAt(w,floor,c-1)||roomAt(w,floor,c+1)||roomAt(w,floor-1,c)||roomAt(w,floor+1,c)) touches=true;
+  }
+  if(!touches) return 'must connect to the shelter';
+  if(floor>0 && def!=='elevator'){
+    const lift=w.rooms.some(r=>r.def==='elevator'&&r.floor===floor);
+    if(!lift) return 'no elevator reaches this floor';
+  }
+  return null;
+}
+const cost=(w,d,floor)=>Math.round(d.cost*(1+0.08*floor));
+function population(w){ return w.people.length; }
+function housing(w){
+  let cap=6;
+  for(const r of w.rooms) if(r.def==='dorm'&&r.progress>=1) cap+=Math.round(6*(r.w/3)*(1+0.5*(r.lvl-1)));
+  return cap;
+}
+function recalcCaps(w){
+  let gen=320;
+  for(const r of w.rooms){
+    const d=roomDef(r.def);
+    if(d.store&&r.progress>=1) gen+=d.store*(r.w/Math.max(1,d.w))*(1+0.6*(r.lvl-1));
+  }
+  w.cap[R_WATER]=gen; w.cap[R_FOOD]=gen; w.cap[R_MAT]=gen*1.25;
+  w.cap[R_MED]=gen*0.35; w.cap[R_SCRIP]=Math.max(1500,gen*4);
+  w.cap[R_POWER]=Math.max(120,gen*0.5);
+  for(let i=0;i<6;i++) w.res[i]=Math.min(w.res[i],w.cap[i]);
+}
+function roomProd(r){ const d=roomDef(r.def); return d.rate*(1+0.55*(r.lvl-1))*(r.w/Math.max(1,d.w)); }
+function roomPower(r){ const d=roomDef(r.def); return d.power*(1+0.35*(r.lvl-1))*(r.w/Math.max(1,d.w)); }
+function roomSlots(r){ const d=roomDef(r.def); return d.slots===0?0:Math.round(d.slots*(r.w/Math.max(1,d.w)))+(r.lvl-1); }
+function upgradeCost(r){ return Math.round(roomDef(r.def).cost*1.4*r.lvl*(0.7+0.35*r.w)); }
+function roomCenter(r){ return V3((r.col+(r.w-1)/2-(COLS-1)/2)*CW, -r.floor*FH, 0); }
+function roomBounds(r){
+  const c=roomCenter(r), hw=r.w*CW/2;
+  return {lo:[c.x-hw, c.y-0.1, -RD/2], hi:[c.x+hw, c.y+FH*0.9, RD/2]};
+}
+</script>
+<script>
+"use strict";
+// ---- simulation tick ------------------------------------------------------
+const SEC_PER_DAY=240;   // real seconds per in-game day at 1x
+
+function tick(w,dt){
+  if(w.paused) return;
+  dt*=w.speed;
+  w.time+=dt;
+  const day=Math.floor(w.time/SEC_PER_DAY)+1;
+  if(day!==w.day){ w.day=day; note(w,'Day '+day+' begins.',''); }
+
+  const prod=[0,0,0,0,0,0], cons=[0,0,0,0,0,0];
+
+  // construction progress
+  for(const r of w.rooms){
+    if(r.progress>=1) continue;
+    r.progress=Math.min(1,r.progress+dt/(4.5*r.w));
+    if(r.progress>=1){ recalcCaps(w); note(w,roomDef(r.def).name+' is finished.','good'); }
+  }
+
+  // power: generators feed the pool, everything else draws from it
+  let supply=0, demand=0;
+  for(const r of w.rooms){
+    if(r.progress<1) continue;
+    const d=roomDef(r.def);
+    if(d.prod===R_POWER && !r.broken) supply += roomProd(r)*crew(w,r)*r.cond;
+    demand += roomPower(r);
+  }
+  const supplied=supply*dt/60;
+  w.res[R_POWER]=Math.min(w.cap[R_POWER], w.res[R_POWER]+supplied);
+  prod[R_POWER]=supply;
+  const want=demand*dt/60;
+  if(want>0){
+    const take=Math.min(w.res[R_POWER],want);
+    w.res[R_POWER]-=take;
+    w.powerSat=clamp(take/want,0,1);
+    cons[R_POWER]=demand;
+  } else w.powerSat=1;
+
+  // other production
+  for(const r of w.rooms){
+    if(r.progress<1) continue;
+    const d=roomDef(r.def);
+    r.anim += dt*(0.6+0.9*w.powerSat);
+    if(r.broken) continue;
+    // machinery wears, and worn machinery eventually fails
+    if(d.power>0||d.prod>=0){
+      r.cond=Math.max(0, r.cond - dt*(0.00030+0.00045*(1-w.powerSat)));
+      if(r.cond<0.12 && w.rng()<dt*0.02){
+        r.broken=true;
+        note(w,roomDef(r.def).name+' has broken down.','crit');
+      }
+    }
+    if(d.prod>=0 && d.prod!==R_POWER){
+      const out=roomProd(r)*crew(w,r)*r.cond*w.powerSat;
+      prod[d.prod]+=out;
+      w.res[d.prod]=Math.min(w.cap[d.prod], w.res[d.prod]+out*dt/60);
+    }
+  }
+
+  // consumption + needs
+  const hours=dt*(24/SEC_PER_DAY);
+  let foodWant=0, waterWant=0;
+  for(const p of w.people){ foodWant+=0.55*hours; waterWant+=0.65*hours; }
+  const foodGot=Math.min(w.res[R_FOOD],foodWant), waterGot=Math.min(w.res[R_WATER],waterWant);
+  w.res[R_FOOD]-=foodGot; w.res[R_WATER]-=waterGot;
+  cons[R_FOOD]=foodWant*60/Math.max(dt,1e-6); cons[R_WATER]=waterWant*60/Math.max(dt,1e-6);
+  const foodCov=foodWant>0?foodGot/foodWant:1, waterCov=waterWant>0?waterGot/waterWant:1;
+
+  const rec=w.rooms.filter(r=>r.progress>=1&&roomDef(r.def).morale)
+                   .reduce((a,r)=>a+roomDef(r.def).morale*(1+0.25*(r.lvl-1)),0);
+  const medbay=w.rooms.some(r=>r.def==='medbay'&&r.progress>=1&&!r.broken);
+
+  for(const p of w.people){
+    p.hunger=clamp(p.hunger + hours*6*(1-foodCov) - hours*8*foodCov, 0, 100);
+    p.thirst=clamp(p.thirst + hours*7*(1-waterCov) - hours*9*waterCov, 0, 100);
+    p.energy=clamp(p.energy - hours*3.2 + (p.job?0:hours*1.5), 0, 100);
+
+    let target=52+rec;
+    target += 12*foodCov + 12*waterCov;
+    target -= p.hunger*0.3 + p.thirst*0.3;
+    target -= (1-p.health/100)*25;
+    if(p.job) target+=6; else target-=6;
+    if(w.powerSat<0.6) target-=14;
+    p.happy=damp(p.happy, clamp(target,0,100), 0.15, dt);
+
+    let dh=0;
+    if(p.hunger>80) dh-=hours*3;
+    if(p.thirst>80) dh-=hours*4;
+    if(dh===0) dh += hours*(medbay?2.2:0.8);
+    p.health=clamp(p.health+dh,0,100);
+    if(p.health<=0){
+      note(w,p.name+' has died.','crit');
+      p.dead=true;
+    }
+  }
+  if(w.people.some(p=>p.dead)){
+    for(const p of w.people) if(p.dead) unassign(w,p);
+    w.people=w.people.filter(p=>!p.dead);
+    uiInspDirty=true;
+  }
+
+  // newcomers, faster with a working Signals room
+  w.newcomer=(w.newcomer||90)-dt*(1+0.9*w.rooms.filter(r=>r.def==='radio'&&r.progress>=1).length);
+  if(w.newcomer<=0){
+    w.newcomer=110+w.rng()*90;
+    if(population(w)<housing(w) && avgHappy(w)>45){
+      const p=makePerson(w); w.people.push(p);
+      note(w,p.name+' has come in from the surface.','good');
+    }
+  }
+
+  // random trouble
+  w.sinceEvent-=dt;
+  if(w.sinceEvent<=0){
+    w.sinceEvent=95+w.rng()*110;
+    const cand=w.rooms.filter(r=>r.progress>=1&&!r.broken&&roomDef(r.def).power>0);
+    if(cand.length&&w.rng()<0.6){
+      const r=cand[(w.rng()*cand.length)|0];
+      r.broken=true; r.cond=Math.min(r.cond,0.3);
+      note(w,'Equipment failure in the '+roomDef(r.def).name+'.','crit');
+    }
+  }
+
+  // smoothed flow readout for the resource bar arrows
+  for(let i=0;i<6;i++){
+    w.prod[i]=damp(w.prod[i],prod[i],3,dt);
+    w.cons[i]=damp(w.cons[i],cons[i],3,dt);
+    w.flow[i]=w.prod[i]-w.cons[i];
+  }
+
+  moveePeople(w,dt);
+  uiTopDirty=true;
+}
+function crew(w,r){
+  const slots=roomSlots(r);
+  if(slots<=0) return 0;
+  let sum=0;
+  for(const pid of r.staff){
+    const p=w.people.find(x=>x.id===pid);
+    if(!p) continue;
+    // skill 5 is the reference worker; health/mood/energy all bite
+    sum += (0.45+0.11*p.skill) * (0.55+0.45*p.health/100)
+         * (0.70+0.30*p.happy/100) * (0.60+0.40*p.energy/100);
+  }
+  return clamp(sum/slots,0,1.6);
+}
+const avgHappy=w=>w.people.length? w.people.reduce((a,p)=>a+p.happy,0)/w.people.length : 0;
+function unassign(w,p){
+  if(!p.job) return;
+  const r=w.rooms.find(x=>x.id===p.job);
+  if(r) r.staff=r.staff.filter(id=>id!==p.id);
+  p.job=0;
+}
+function assign(w,p,r){
+  unassign(w,p);
+  if(!r||roomSlots(r)<=r.staff.length) return false;
+  r.staff.push(p.id); p.job=r.id;
+  return true;
+}
+function autoStaff(w){
+  let n=0;
+  const order=w.rooms.filter(r=>roomSlots(r)>0&&r.progress>=1)
+    .sort((a,b)=>(roomDef(b.def).prod>=0?1:0)-(roomDef(a.def).prod>=0?1:0));
+  for(const r of order){
+    while(r.staff.length<roomSlots(r)){
+      const free=w.people.filter(p=>!p.job).sort((a,b)=>b.skill-a.skill)[0];
+      if(!free) return n;
+      if(assign(w,free,r)) n++; else break;
+    }
+  }
+  return n;
+}
+// Residents walk to their posted room, or mill about the entrance.
+function moveePeople(w,dt){
+  for(const p of w.people){
+    let dest;
+    if(p.job){
+      const r=w.rooms.find(x=>x.id===p.job);
+      if(r){
+        const slots=Math.max(1,roomSlots(r)), idx=r.staff.indexOf(p.id);
+        const t=((idx<0?0:idx)+0.5)/slots, c=roomCenter(r), hw=r.w*CW/2-0.9;
+        dest=V3(c.x-hw+t*2*hw, c.y, -0.9);
+      }
+    }
+    if(!dest){
+      const e=w.rooms[0], c=roomCenter(e);
+      dest=V3(c.x+Math.sin(p.phase+w.time*0.22)*2.0, c.y, -0.6+Math.cos(p.phase*1.7)*0.8);
+    }
+    const d=sub(dest,p.pos), dist=len(d);
+    if(dist>0.12){
+      const sp=Math.min(2.2, dist/Math.max(dt,1e-3));
+      p.pos.x+=d.x/dist*sp*dt; p.pos.y+=d.y/dist*sp*dt; p.pos.z+=d.z/dist*sp*dt;
+      p.facing=Math.atan2(d.x,d.z);
+      p.walking=true;
+    } else p.walking=false;
+  }
+}
+</script>
+<script>
+"use strict";
+// ---- GL setup -------------------------------------------------------------
+const canvas=document.getElementById('gl');
+const gl=canvas.getContext('webgl2',{antialias:true,alpha:false,powerPreference:'high-performance'});
+if(!gl){ document.body.innerHTML='<div style="padding:40px;color:#e7dfc9;font:14px monospace">'+
+  'This game needs WebGL2. Try a current Safari, Chrome or Firefox.</div>'; throw new Error('no webgl2'); }
+
+function shader(type,src){
+  const s=gl.createShader(type);
+  gl.shaderSource(s,src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))
+    throw new Error('shader: '+gl.getShaderInfoLog(s));
+  return s;
+}
+function program(vs,fs){
+  const p=gl.createProgram();
+  gl.attachShader(p,shader(gl.VERTEX_SHADER,vs));
+  gl.attachShader(p,shader(gl.FRAGMENT_SHADER,fs));
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p,gl.LINK_STATUS))
+    throw new Error('link: '+gl.getProgramInfoLog(p));
+  return p;
+}
+const prog=program(SCENE_VS,SCENE_FS);
+gl.useProgram(prog);
+// Uniform locations resolved once, not per draw call.
+const U={};
+for(const n of ['uView','uProj','uEye','uAlbedo','uAmbSky','uAmbGnd','uFogCol','uShadowTint',
+  'uHighTint','uMetallic','uRoughness','uEmissive','uExposure','uFogDensity','uSaturation',
+  'uContrast','uVignette','uViewport','uSurfaceKind','uLightCount','uBoxCount','uRayShadows',
+  'uLightPT','uLightCI','uLightPar','uBoxMin','uBoxMax'])
+  U[n]=gl.getUniformLocation(prog,n);
+
+const INSTANCE_FLOATS=20;   // mat4 + tint vec4
+function makeMesh(mb){
+  const vao=gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  const vbo=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER,vbo);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(mb.v),gl.STATIC_DRAW);
+  const S=8*4;
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,3,gl.FLOAT,false,S,0);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1,3,gl.FLOAT,false,S,12);
+  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2,2,gl.FLOAT,false,S,24);
+  const ibo=gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ibo);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(mb.i),gl.STATIC_DRAW);
+  const inst=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER,inst);
+  gl.bufferData(gl.ARRAY_BUFFER,4*INSTANCE_FLOATS*256,gl.DYNAMIC_DRAW);
+  const IS=INSTANCE_FLOATS*4;
+  for(let k=0;k<4;k++){
+    gl.enableVertexAttribArray(3+k);
+    gl.vertexAttribPointer(3+k,4,gl.FLOAT,false,IS,k*16);
+    gl.vertexAttribDivisor(3+k,1);
+  }
+  gl.enableVertexAttribArray(7); gl.vertexAttribPointer(7,4,gl.FLOAT,false,IS,64);
+  gl.vertexAttribDivisor(7,1);
+  gl.bindVertexArray(null);
+  return {vao,inst,count:mb.i.length,cap:256};
+}
+function drawMesh(m,data,n){
+  if(n<=0) return;
+  gl.bindVertexArray(m.vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER,m.inst);
+  if(n>m.cap){ m.cap=Math.max(n,m.cap*2); gl.bufferData(gl.ARRAY_BUFFER,4*INSTANCE_FLOATS*m.cap,gl.DYNAMIC_DRAW); }
+  gl.bufferSubData(gl.ARRAY_BUFFER,0,data,0,n*INSTANCE_FLOATS);
+  gl.drawElementsInstanced(gl.TRIANGLES,m.count,gl.UNSIGNED_SHORT,0,n);
+  stats.draws++; stats.tris+=(m.count/3)*n;
+}
+
+// ---- mesh library ---------------------------------------------------------
+const MESH={};
+// Unit shell pieces (1 x 1 footprint), scaled per room by the model matrix.
+{ let m=MB(); addBox(m,[0,-0.12,0],[0.5,0.12,0.5],[4,4]);             MESH.floor=makeMesh(m); }
+{ let m=MB(); addBox(m,[0,0.5,-0.5],[0.5,0.5,0.06],[4,2]);            MESH.wall=makeMesh(m); }
+{ let m=MB(); addBox(m,[0,0,0],[0.5,0.5,0.5]);                        MESH.cube=makeMesh(m); }
+{ let m=MB(); addCyl(m,[0,0,0],1.05,2.1,18);                          MESH.drum=makeMesh(m); }
+{ let m=MB(); addCyl(m,[0,0,0],0.85,2.6,16);                          MESH.tank=makeMesh(m); }
+{ let m=MB(); addBox(m,[0,1.0,0],[1.5,1.0,0.42],[3,2]);               MESH.rack=makeMesh(m); }
+{ let m=MB(); addBox(m,[0,0.34,0],[0.95,0.34,1.85]); addBox(m,[0,1.12,0],[0.95,0.34,1.85]);
+                                                                      MESH.bunk=makeMesh(m); }
+{ let m=MB(); addBox(m,[0,0.45,0],[1.25,0.45,0.62]);                  MESH.bench=makeMesh(m); }
+{ let m=MB(); for(let i=0;i<3;i++) addBox(m,[0,0.35+i*0.7,0],[0.55,0.35,0.55]);
+                                                                      MESH.crate=makeMesh(m); }
+{ let m=MB(); addBox(m,[0,0.5,0],[0.85,0.5,0.42]); addBox(m,[0,1.02,-0.16],[0.72,0.34,0.08]);
+                                                                      MESH.desk=makeMesh(m); }
+{ let m=MB(); addBox(m,[0,0.3,0],[0.9,0.3,1.7]);                      MESH.bed=makeMesh(m); }
+{ let m=MB(); addBox(m,[0,FH*0.45,0],[CW*0.40,FH*0.45,RD*0.34]);      MESH.lift=makeMesh(m); }
+{ let m=MB(); addCapsule(m,[0,0,0],0.27,1.50,10);                     MESH.body=makeMesh(m); }
+{ let m=MB(); addCapsule(m,[0,0,0],0.5,1.0,10);                       MESH.head=makeMesh(m); }
+{ let m=MB(); addBox(m,[0,0,0],[0.5,0.02,0.5]);                       MESH.ghost=makeMesh(m); }
+
+// ---- camera ---------------------------------------------------------------
+const cam={
+  fx:0, fy:-FH*0.5, fz:0, tfx:0, tfy:-FH*0.5, tfz:0,
+  dist:21, tdist:21, yaw:0.16, tyaw:0.16, pitch:0.42, tpitch:0.42,
+  eye:V3(), view:mIdent(), proj:mIdent(),
+};
+function camUpdate(dt){
+  cam.fx=damp(cam.fx,cam.tfx,9,dt); cam.fy=damp(cam.fy,cam.tfy,9,dt); cam.fz=damp(cam.fz,cam.tfz,9,dt);
+  cam.dist=damp(cam.dist,cam.tdist,9,dt);
+  cam.yaw=damp(cam.yaw,cam.tyaw,9,dt); cam.pitch=damp(cam.pitch,cam.tpitch,9,dt);
+  const cp=Math.cos(cam.pitch), sp=Math.sin(cam.pitch);
+  cam.eye=V3(cam.fx+cam.dist*cp*Math.sin(cam.yaw), cam.fy+cam.dist*sp, cam.fz+cam.dist*cp*Math.cos(cam.yaw));
+  cam.view=mLookAt(cam.eye,V3(cam.fx,cam.fy,cam.fz),V3(0,1,0));
+  cam.proj=mPersp(46*Math.PI/180, canvas.width/Math.max(1,canvas.height), 0.1, 400);
+}
+function camPan(dx,dy){
+  const s=cam.dist*0.0016;
+  const fwd=V3(-Math.sin(cam.yaw),0,-Math.cos(cam.yaw));
+  const rgt=V3(Math.cos(cam.yaw),0,-Math.sin(cam.yaw));
+  cam.tfx=clamp(cam.tfx+(rgt.x*dx - fwd.x*dy)*s, -COLS*CW*0.6, COLS*CW*0.6);
+  cam.tfz=clamp(cam.tfz+(rgt.z*dx - fwd.z*dy)*s, -40, 40);
+}
+// Screen ray -> the (floor, col) cell under the cursor.
+function pickCell(px,py){
+  const ndcX=px/canvas.clientWidth*2-1, ndcY=1-py/canvas.clientHeight*2;
+  const inv=mInv(mMul(cam.proj,cam.view));
+  const un=(x,y,z)=>{
+    const o=[inv[0]*x+inv[4]*y+inv[8]*z+inv[12], inv[1]*x+inv[5]*y+inv[9]*z+inv[13],
+             inv[2]*x+inv[6]*y+inv[10]*z+inv[14], inv[3]*x+inv[7]*y+inv[11]*z+inv[15]];
+    return V3(o[0]/o[3],o[1]/o[3],o[2]/o[3]);
+  };
+  const a=un(ndcX,ndcY,-1), b=un(ndcX,ndcY,1);
+  const d=norm(sub(b,a));
+  let best=null,bt=1e30;
+  for(let f=0;f<FLOORS;f++){
+    const py2=-f*FH;
+    if(Math.abs(d.y)<1e-6) continue;
+    const t=(py2-a.y)/d.y;
+    if(t<0||t>=bt) continue;
+    const hx=a.x+d.x*t, hz=a.z+d.z*t;
+    if(Math.abs(hz)>RD*0.75) continue;
+    const col=Math.round(hx/CW+(COLS-1)/2);
+    if(col<0||col>=COLS) continue;
+    best={floor:f,col}; bt=t;
+  }
+  return best;
+}
+const stats={draws:0,tris:0};
+</script>
+<script>
+"use strict";
+// ---- rendering ------------------------------------------------------------
+const SKIN=[0xC98E63,0xE8B98A,0x8D5A3C,0x6A4A33,0xF2CBA0,0x8A5C3E].map(hexLin);
+const OUTFIT=[0x3E4A42,0x44403A,0x3A4048,0x4A3E38].map(hexLin);
+const buf=new Float32Array(INSTANCE_FLOATS*512);
+let bufN=0;
+function push(model,tint,extra){
+  if((bufN+1)*INSTANCE_FLOATS>buf.length) return;
+  const o=bufN*INSTANCE_FLOATS;
+  buf.set(model,o);
+  buf[o+16]=tint[0]; buf[o+17]=tint[1]; buf[o+18]=tint[2]; buf[o+19]=extra===undefined?1:extra;
+  bufN++;
+}
+function flush(mesh,kind,albedo,metal,rough,emis){
+  if(!bufN) return;
+  gl.uniform1i(U.uSurfaceKind,kind);
+  gl.uniform3f(U.uAlbedo,albedo[0],albedo[1],albedo[2]);
+  gl.uniform1f(U.uMetallic,metal); gl.uniform1f(U.uRoughness,rough);
+  gl.uniform1f(U.uEmissive,emis||0);
+  drawMesh(mesh,buf,bufN);
+  bufN=0;
+}
+const MESH_OF={drum:'drum',tank:'tank',rack:'rack',bunk:'bunk',bench:'bench',
+               crate:'crate',desk:'desk',bed:'bed',lift:'lift'};
+const WHITE=[1,1,1];
+
+function render(w,dt){
+  const dpr=Math.min(window.devicePixelRatio||1, 2);
+  const cw=Math.floor(canvas.clientWidth*dpr), ch=Math.floor(canvas.clientHeight*dpr);
+  if(canvas.width!==cw||canvas.height!==ch){ canvas.width=cw; canvas.height=ch; }
+  gl.viewport(0,0,canvas.width,canvas.height);
+  gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
+  gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK);
+  gl.clearColor(0.055,0.058,0.070,1);
+  gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+  stats.draws=0; stats.tris=0;
+
+  gl.useProgram(prog);
+  gl.uniformMatrix4fv(U.uView,false,cam.view);
+  gl.uniformMatrix4fv(U.uProj,false,cam.proj);
+  gl.uniform3f(U.uEye,cam.eye.x,cam.eye.y,cam.eye.z);
+  gl.uniform3fv(U.uAmbSky,TONE.ambSky); gl.uniform3fv(U.uAmbGnd,TONE.ambGnd);
+  gl.uniform3fv(U.uFogCol,TONE.fogCol); gl.uniform3fv(U.uShadowTint,TONE.shadowTint);
+  gl.uniform3fv(U.uHighTint,TONE.highTint);
+  gl.uniform1f(U.uExposure,TONE.exposure); gl.uniform1f(U.uFogDensity,TONE.fogDensity);
+  gl.uniform1f(U.uSaturation,TONE.saturation); gl.uniform1f(U.uContrast,TONE.contrast);
+  gl.uniform1f(U.uVignette,TONE.vignette);
+  gl.uniform2f(U.uViewport,canvas.width,canvas.height);
+
+  // lights: one angled key + the nearest room fixtures
+  const pt=[], ci=[], par=[];
+  const kd=norm(V3(0.62,-0.60,0.42));
+  pt.push(kd.x,kd.y,kd.z,0); ci.push(0.82,0.84,0.92,1.5); par.push(1000,0,0,0);
+  const lit=w.rooms.filter(r=>r.progress>=1)
+    .map(r=>({r,d:(roomCenter(r).x-cam.fx)**2+(roomCenter(r).y-cam.fy)**2}))
+    .sort((a,b)=>a.d-b.d).slice(0,MAX_LIGHTS-1);
+  for(const {r} of lit){
+    const c=roomCenter(r), bad=r.broken;
+    // damaged rooms flicker on a cheap per-room noise
+    const fl=bad? 0.45+0.55*Math.abs(Math.sin(w.time*7+r.anim)*Math.sin(w.time*3.3+r.anim)) : 1;
+    pt.push(c.x,c.y+FH*0.82,c.z,1);
+    if(bad) ci.push(1.0,0.30,0.18, 1.7*fl);
+    else    ci.push(1.0,0.74,0.46, (w.powerSat*1.9+0.45));
+    par.push(CW*r.w*0.85+RD,0,0,0);
+  }
+  gl.uniform1i(U.uLightCount,pt.length/4);
+  gl.uniform4fv(U.uLightPT,new Float32Array(pt));
+  gl.uniform4fv(U.uLightCI,new Float32Array(ci));
+  gl.uniform4fv(U.uLightPar,new Float32Array(par));
+
+  // box soup for the ray-traced shadows: nearest rooms only
+  const boxes=w.rooms.filter(r=>r.progress>=1&&roomDef(r.def).mesh!=='none')
+    .map(r=>({b:roomBounds(r), d:(roomCenter(r).x-cam.fx)**2+(roomCenter(r).y-cam.fy)**2}))
+    .sort((a,b)=>a.d-b.d).slice(0,MAX_BOXES);
+  const bmin=new Float32Array(MAX_BOXES*3), bmax=new Float32Array(MAX_BOXES*3);
+  boxes.forEach((x,i)=>{ bmin.set(x.b.lo,i*3); bmax.set(x.b.hi,i*3); });
+  gl.uniform1i(U.uBoxCount,boxes.length);
+  gl.uniform3fv(U.uBoxMin,bmin); gl.uniform3fv(U.uBoxMax,bmax);
+  gl.uniform1i(U.uRayShadows, quality>=2?2:(quality>=1?1:0));
+
+  // --- room shells: floor slab, back wall, side pillars, ceiling lintel ---
+  for(const r of w.rooms){
+    const c=roomCenter(r), wdt=r.w*CW;
+    push(mMul(mTrans(c.x,c.y,0), mScale(wdt,1,RD)), WHITE);
+  }
+  flush(MESH.floor,SK.CONCRETE,hexLin(0x6E6A62),0.02,0.92);
+
+  for(const r of w.rooms){
+    const c=roomCenter(r), wdt=r.w*CW;
+    push(mMul(mTrans(c.x,c.y,0), mScale(wdt,FH*0.92,RD)), WHITE);
+  }
+  flush(MESH.wall,SK.CONCRETE,hexLin(0x55524C),0.02,0.95);
+
+  // pillars at each room edge + a lintel across the top: this is what makes
+  // the shelter read as rooms cut into rock rather than floating slabs
+  for(const r of w.rooms){
+    const c=roomCenter(r), wdt=r.w*CW;
+    for(const sx of [-1,1])
+      push(mMul(mTrans(c.x+sx*wdt/2, c.y+FH*0.46, 0), mScale(0.42,FH*0.92,RD*0.98)), WHITE);
+    push(mMul(mTrans(c.x, c.y+FH*0.90, 0), mScale(wdt,0.34,RD*0.98)), WHITE);
+  }
+  flush(MESH.cube,SK.PAINTED,hexLin(0x4A4640),0.3,0.62);
+
+  // room fixtures, batched per mesh
+  const byMesh={};
+  for(const r of w.rooms){
+    const d=roomDef(r.def);
+    if(d.mesh==='none') continue;
+    (byMesh[d.mesh]=byMesh[d.mesh]||[]).push(r);
+  }
+  for(const key in byMesh){
+    const list=byMesh[key];
+    const d0=roomDef(list[0].def);
+    for(const r of list){
+      const d=roomDef(r.def), c=roomCenter(r);
+      const dim = r.broken?0.45 : (r.progress<1?0.5:1);
+      const bob = (d.prod>=0&&!r.broken&&r.progress>=1)
+        ? Math.sin(w.time*1.6+r.anim)*0.035*w.powerSat : 0;
+      const n=Math.max(1,r.w-1);
+      for(let i=0;i<n;i++){
+        const t=n===1?0.5:(i+0.5)/n;
+        const x=c.x-(r.w*CW/2-1.6)+t*(r.w*CW-3.2);
+        push(mTrans(x, c.y+bob, 0.55), [dim,dim,dim]);
+      }
+    }
+    const d=roomDef(list[0].def);
+    flush(MESH[MESH_OF[key]]||MESH.crate, d.sk, hexLin(d.col),
+          d.sk===SK.BRUSHED||d.sk===SK.RUST?0.6:0.1, 0.6);
+    void d0;
+  }
+
+  // residents: clothed body, then a skin-toned head on top
+  for(let s=0;s<4;s++){
+    for(const p of w.people){
+      if(p.skin%4!==s) continue;
+      // a small bob while walking reads as motion without a skeleton
+      const bob=p.walking? Math.abs(Math.sin(w.time*7+p.phase))*0.06 : 0;
+      push(mMul(mMul(mTrans(p.pos.x,p.pos.y+bob,p.pos.z), mRotY(p.facing)), mScale(1.1,1.05,1.1)), WHITE);
+    }
+    flush(MESH.body,SK.SKIN,OUTFIT[s],0.02,0.86);
+  }
+  for(let s=0;s<6;s++){
+    for(const p of w.people){
+      if(p.skin!==s) continue;
+      const bob=p.walking? Math.abs(Math.sin(w.time*7+p.phase))*0.06 : 0;
+      push(mMul(mTrans(p.pos.x,p.pos.y+bob+1.24,p.pos.z), mScale(0.44,0.44,0.44)), WHITE);
+    }
+    flush(MESH.head,SK.SKIN,SKIN[s],0,0.66);
+  }
+
+  // build ghost
+  if(buildMode && hoverCell){
+    const d=roomDef(buildMode);
+    const err=canBuild(world,buildMode,hoverCell.floor,hoverCell.col);
+    const tint=err?[1.6,0.25,0.2]:[0.35,1.5,0.45];
+    for(let i=0;i<d.w;i++){
+      const x=(hoverCell.col+i-(COLS-1)/2)*CW;
+      push(mMul(mTrans(x,-hoverCell.floor*FH+0.06,0),mScale(CW*0.94,1,RD*0.94)), tint, 1);
+    }
+    flush(MESH.ghost,SK.EMISSIVE,[1,1,1],0,0.4,2.4);
+  }
+}
+</script>
+<script>
+"use strict";
+// ---- state ----------------------------------------------------------------
+let world=null, buildMode=null, hoverCell=null, selRoom=null, quality=1, running=false;
+let uiTopDirty=true, uiNotesDirty=true, uiInspDirty=true;
+const SAVE_KEY='haven.save.v1';
+
+// ---- UI -------------------------------------------------------------------
+const $=id=>document.getElementById(id);
+function buildPalette(){
+  const host=$('rooms'); host.innerHTML='';
+  for(const d of ROOMS){
+    const b=document.createElement('button');
+    b.className='rb'+(buildMode===d.id?' sel':'');
+    const locked=population(world)<d.pop;
+    if(locked) b.className+=' locked';
+    b.innerHTML='<span class="sw" style="background:'+hexCss(d.col)+'"></span>'+
+      '<span class="nm">'+d.name+'</span>'+
+      '<span class="ct">'+(locked? 'pop '+d.pop : cost(world,d,0))+'</span>';
+    b.title=d.desc+(locked?'\nNeeds '+d.pop+' residents.':'');
+    b.onclick=()=>{
+      if(locked){ toast('Needs '+d.pop+' residents'); return; }
+      buildMode = buildMode===d.id? null : d.id;
+      selRoom=null; uiInspDirty=true; buildPalette(); updateMode();
+    };
+    host.appendChild(b);
+  }
+}
+function updateMode(){
+  const m=$('mode');
+  if(buildMode){
+    const d=roomDef(buildMode);
+    m.style.display='block';
+    m.innerHTML='Placing <b>'+d.name+'</b> — click a cell &nbsp;·&nbsp; <b>Esc</b> to cancel';
+  } else m.style.display='none';
+}
+let toastT=0;
+function toast(msg){
+  const t=$('toast'); t.textContent=msg; t.style.opacity='1'; toastT=1.6;
+}
+function updateTop(){
+  const host=$('top');
+  if(!host.dataset.init){
+    host.innerHTML=RES.map((r,i)=>
+      '<div class="res"><span class="k" style="color:'+hexCss(r.c)+'">'+r.k+'</span>'+
+      '<span class="v" id="rv'+i+'">0</span><span class="d" id="rd'+i+'"></span></div>').join('')+
+      '<div id="clock"><span id="pop"></span><b id="tday"></b>'+
+      '<button class="tbtn" id="bspeed">1x</button>'+
+      '<button class="tbtn" id="bstaff">Staff</button>'+
+      '<button class="tbtn" id="bq">RT</button></div>';
+    host.dataset.init='1';
+    $('bspeed').onclick=()=>{
+      world.speed = world.speed===1?2 : world.speed===2?4 : world.speed===0?1 : 1;
+      if(world.paused){ world.paused=false; world.speed=1; }
+      $('bspeed').textContent=world.speed+'x';
+    };
+    $('bstaff').onclick=()=>{
+      const n=autoStaff(world);
+      toast(n? n+' posted to jobs' : 'No free residents or slots');
+      uiInspDirty=true;
+    };
+    $('bq').onclick=()=>{
+      quality=(quality+1)%3;
+      $('bq').textContent=['RT off','RT light','RT low'][quality];
+      $('bq').className='tbtn'+(quality?' on':'');
+    };
+    $('bq').textContent='RT light'; $('bq').className='tbtn on';
+  }
+  for(let i=0;i<6;i++){
+    $('rv'+i).textContent=Math.floor(world.res[i]);
+    const f=world.flow[i], d=$('rd'+i);
+    if(Math.abs(f)<0.4){ d.textContent=''; d.className='d'; }
+    else { d.textContent=(f>0?'▲':'▼')+Math.abs(f).toFixed(0); d.className='d '+(f>0?'up':'dn'); }
+  }
+  $('pop').innerHTML='<span style="color:var(--dim)">POP</span> '+population(world)+'/'+housing(world);
+  const hr=Math.floor((world.time%SEC_PER_DAY)/SEC_PER_DAY*24);
+  $('tday').textContent='DAY '+world.day+'  '+String(hr).padStart(2,'0')+':00';
+}
+function updateNotes(){
+  const host=$('notes'), n=world.notes.slice(0,7);
+  $('log').style.display=n.length?'block':'none';
+  host.innerHTML=n.map(x=>'<div class="note '+x.cls+'">'+x.text+'</div>').join('');
+}
+function updateInsp(){
+  const box=$('insp');
+  if(!selRoom){ box.style.display='none'; return; }
+  const r=world.rooms.find(x=>x.id===selRoom);
+  if(!r){ selRoom=null; box.style.display='none'; return; }
+  const d=roomDef(r.def), slots=roomSlots(r);
+  const up=upgradeCost(r), canUp=r.lvl<3 && world.res[R_MAT]>=up;
+  let html='<div class="t">'+d.name+'</div><div class="s">'+d.desc+'</div>';
+  html+='<div class="row"><span>Level</span><span>'+r.lvl+' / 3</span></div>';
+  if(r.progress<1){
+    html+='<div class="row"><span>Building</span><span>'+Math.round(r.progress*100)+'%</span></div>'+
+          '<div class="bar"><i style="width:'+(r.progress*100)+'%"></i></div>';
+  } else {
+    html+='<div class="row"><span>Condition</span><span>'+Math.round(r.cond*100)+'%</span></div>'+
+          '<div class="bar"><i style="width:'+(r.cond*100)+'%;background:'+
+          (r.cond<0.3?'var(--crit)':'var(--amber)')+'"></i></div>';
+    if(slots>0){
+      html+='<div class="row"><span>Staff</span><span>'+r.staff.length+' / '+slots+'</span></div>';
+      html+='<div class="row"><span>Efficiency</span><span>'+Math.round(crew(world,r)*100)+'%</span></div>';
+    }
+    if(d.prod>=0){
+      const rate=roomProd(r)*crew(world,r)*r.cond*(d.prod===R_POWER?1:world.powerSat);
+      html+='<div class="row"><span>Output</span><span>'+rate.toFixed(1)+' '+RES[d.prod].k+'/min</span></div>';
+    }
+    if(d.power>0) html+='<div class="row"><span>Draw</span><span>'+roomPower(r).toFixed(1)+' PWR/min</span></div>';
+    if(r.broken) html+='<div class="row" style="color:var(--crit)"><span>Status</span><span>BROKEN</span></div>';
+  }
+  html+='<div class="acts">';
+  if(r.broken) html+='<button class="pri" id="afix">Repair 40</button>';
+  html+='<button id="aup"'+(canUp?' class="pri"':' disabled')+'>Upgrade '+up+'</button>';
+  if(slots>0) html+='<button id="aman">Staff</button>';
+  if(!r.entrance) html+='<button id="adel">Demolish</button>';
+  html+='</div>';
+  box.innerHTML=html; box.style.display='block';
+
+  const fix=$('afix'); if(fix) fix.onclick=()=>{
+    if(world.res[R_MAT]<40){ toast('Need 40 materials'); return; }
+    world.res[R_MAT]-=40; r.broken=false; r.cond=1;
+    note(world,roomDef(r.def).name+' repaired.','good'); uiInspDirty=true;
+  };
+  const upb=$('aup'); if(upb) upb.onclick=()=>{
+    if(r.lvl>=3||world.res[R_MAT]<up) return;
+    world.res[R_MAT]-=up; r.lvl++; r.cond=Math.min(1,r.cond+0.35); r.broken=false;
+    recalcCaps(world); note(world,roomDef(r.def).name+' upgraded to level '+r.lvl+'.','good');
+    uiInspDirty=true;
+  };
+  const man=$('aman'); if(man) man.onclick=()=>{
+    // fill this room first, then release anyone it can't hold
+    if(r.staff.length>=roomSlots(r)){
+      for(const pid of r.staff.slice()){ const p=world.people.find(x=>x.id===pid); if(p) unassign(world,p); }
+      toast('Staff released');
+    } else {
+      let n=0;
+      while(r.staff.length<roomSlots(r)){
+        const free=world.people.filter(p=>!p.job).sort((a,b)=>b.skill-a.skill)[0];
+        if(!free) break;
+        if(assign(world,free,r)) n++; else break;
+      }
+      toast(n? n+' assigned here' : 'No free residents');
+    }
+    uiInspDirty=true;
+  };
+  const del=$('adel'); if(del) del.onclick=()=>{
+    for(const pid of r.staff.slice()){ const p=world.people.find(x=>x.id===pid); if(p) unassign(world,p); }
+    world.res[R_MAT]+=cost(world,d,r.floor)*0.5;
+    world.rooms=world.rooms.filter(x=>x.id!==r.id);
+    selRoom=null; recalcCaps(world); note(world,d.name+' stripped out.',''); uiInspDirty=true;
+  };
+}
+
+// ---- input ----------------------------------------------------------------
+const keys={};
+addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(e.code==='Escape'){ buildMode=null; selRoom=null; buildPalette(); updateMode(); uiInspDirty=true; }
+  if(e.code==='Space'){ e.preventDefault(); world.paused=!world.paused;
+    $('bspeed').textContent=world.paused?'||':world.speed+'x'; }
+});
+addEventListener('keyup',e=>{ keys[e.code]=false; });
+
+let drag=null;
+canvas.addEventListener('pointerdown',e=>{
+  canvas.setPointerCapture(e.pointerId);
+  drag={x:e.clientX,y:e.clientY,btn:e.button,moved:0};
+});
+canvas.addEventListener('pointermove',e=>{
+  const r=canvas.getBoundingClientRect();
+  hoverCell=pickCell(e.clientX-r.left, e.clientY-r.top);
+  if(!drag) return;
+  const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
+  drag.moved+=Math.abs(dx)+Math.abs(dy);
+  if(drag.btn===2||e.shiftKey){
+    cam.tyaw-=dx*0.006;
+    cam.tpitch=clamp(cam.tpitch-dy*0.004, 0.12, 1.35);
+  } else if(drag.btn===1){ camPan(dx,dy); }
+  drag.x=e.clientX; drag.y=e.clientY;
+});
+canvas.addEventListener('pointerup',e=>{
+  const wasDrag = drag && drag.moved>6;
+  const btn = drag? drag.btn : 0;
+  drag=null;
+  if(wasDrag||btn!==0) return;
+  const r=canvas.getBoundingClientRect();
+  const cell=pickCell(e.clientX-r.left, e.clientY-r.top);
+  if(!cell) return;
+  if(buildMode){
+    const err=canBuild(world,buildMode,cell.floor,cell.col);
+    if(err){ toast(err); return; }
+    const d=roomDef(buildMode);
+    world.res[R_MAT]-=cost(world,d,cell.floor);
+    world.rooms.push({id:world.nextRoom++, def:buildMode, floor:cell.floor, col:cell.col,
+      w:d.w, lvl:1, cond:1, staff:[], progress:0, broken:false, anim:Math.random()*6});
+    world.built++;
+    note(world,d.name+' excavation started on level '+(cell.floor+1)+'.','');
+    if(!keys.ShiftLeft&&!keys.ShiftRight){ buildMode=null; buildPalette(); updateMode(); }
+    recalcCaps(world); uiTopDirty=true;
+  } else {
+    const hit=roomAt(world,cell.floor,cell.col);
+    selRoom=hit?hit.id:null; uiInspDirty=true;
+  }
+});
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+canvas.addEventListener('wheel',e=>{
+  e.preventDefault();
+  cam.tdist=clamp(cam.tdist + Math.sign(e.deltaY)*cam.tdist*0.12, 5, 70);
+},{passive:false});
+// pinch zoom
+let pinch=0;
+canvas.addEventListener('touchmove',e=>{
+  if(e.touches.length!==2) return;
+  const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+  if(pinch) cam.tdist=clamp(cam.tdist*(pinch/d), 5, 70);
+  pinch=d;
+},{passive:true});
+canvas.addEventListener('touchend',()=>{pinch=0;});
+
+// ---- save / load ----------------------------------------------------------
+function save(){
+  try{
+    const s={v:1, seed:world.seed, time:world.time, day:world.day, res:world.res,
+      nextRoom:world.nextRoom, nextPerson:world.nextPerson, built:world.built,
+      rooms:world.rooms.map(r=>({id:r.id,def:r.def,floor:r.floor,col:r.col,w:r.w,lvl:r.lvl,
+        cond:r.cond,staff:r.staff,progress:r.progress,broken:r.broken,entrance:!!r.entrance})),
+      people:world.people.map(p=>({id:p.id,name:p.name,skill:p.skill,health:p.health,
+        happy:p.happy,energy:p.energy,hunger:p.hunger,thirst:p.thirst,job:p.job,skin:p.skin,
+        x:p.pos.x,y:p.pos.y,z:p.pos.z}))};
+    localStorage.setItem(SAVE_KEY,JSON.stringify(s));
+    return true;
+  }catch(e){ return false; }
+}
+function load(){
+  try{
+    const s=JSON.parse(localStorage.getItem(SAVE_KEY)||'null');
+    if(!s||s.v!==1) return null;
+    const w=makeWorld(s.seed||1);
+    w.time=s.time||0; w.day=s.day||1; w.res=s.res.slice(); w.built=s.built||0;
+    w.nextRoom=s.nextRoom||1; w.nextPerson=s.nextPerson||1;
+    w.rooms=s.rooms.map(r=>Object.assign({anim:Math.random()*6},r));
+    w.people=s.people.map(p=>({id:p.id,name:p.name,skill:p.skill,health:p.health,happy:p.happy,
+      energy:p.energy,hunger:p.hunger,thirst:p.thirst,job:p.job,skin:p.skin,
+      pos:V3(p.x,p.y,p.z),facing:0,phase:Math.random()*6.28}));
+    // drop staff ids that no longer exist, so a room can't hold ghosts
+    for(const r of w.rooms) r.staff=(r.staff||[]).filter(id=>w.people.some(p=>p.id===id));
+    for(const p of w.people) if(p.job && !w.rooms.some(r=>r.id===p.job)) p.job=0;
+    recalcCaps(w);
+    return w;
+  }catch(e){ return null; }
+}
+
+// ---- main loop ------------------------------------------------------------
+let last=0, fpsAcc=0, fpsN=0, saveT=0;
+function frame(t){
+  requestAnimationFrame(frame);
+  const now=t*0.001;
+  let dt=last? Math.min(now-last, 0.1) : 0.016;
+  last=now;
+  if(!running) return;
+
+  // keyboard pan
+  let px=0,py=0;
+  if(keys.KeyW||keys.ArrowUp) py-=1;
+  if(keys.KeyS||keys.ArrowDown) py+=1;
+  if(keys.KeyA||keys.ArrowLeft) px-=1;
+  if(keys.KeyD||keys.ArrowRight) px+=1;
+  if(px||py) camPan(px*520*dt, py*520*dt);
+  if(keys.KeyQ) cam.tyaw-=dt*1.2;
+  if(keys.KeyE) cam.tyaw+=dt*1.2;
+
+  tick(world,dt);
+  camUpdate(dt);
+  render(world,dt);
+
+  if(toastT>0){ toastT-=dt; if(toastT<=0) $('toast').style.opacity='0'; }
+  if(uiTopDirty){ updateTop(); uiTopDirty=false; }
+  if(uiNotesDirty){ updateNotes(); uiNotesDirty=false; }
+  if(uiInspDirty){ updateInsp(); buildPalette(); uiInspDirty=false; }
+
+  fpsAcc+=dt; fpsN++;
+  if(fpsAcc>0.5){
+    $('fps').textContent=Math.round(fpsN/fpsAcc)+' fps · '+stats.draws+' draws · '+
+      (stats.tris/1000).toFixed(1)+'k tris';
+    fpsAcc=0; fpsN=0;
+  }
+  saveT+=dt;
+  if(saveT>20){ saveT=0; save(); }
+}
+requestAnimationFrame(frame);
+
+// ---- boot -----------------------------------------------------------------
+function start(w){
+  world=w; running=true;
+  $('ov').style.display='none';
+  buildPalette(); updateTop(); updateNotes(); updateInsp(); updateMode();
+  // frame the shelter
+  const c=roomCenter(world.rooms[0]);
+  cam.tfx=cam.fx=c.x; cam.tfy=cam.fy=c.y-1; cam.tfz=cam.fz=0;
+}
+const hasSave=!!localStorage.getItem(SAVE_KEY);
+if(hasSave) $('cont').style.display='block';
+$('play').onclick=()=>start(makeWorld((Math.random()*1e9)|0));
+$('cont').onclick=()=>{ const w=load(); start(w||makeWorld((Math.random()*1e9)|0)); };
+addEventListener('beforeunload',()=>{ if(running) save(); });
+</script>
+</body>
+</html>

@@ -7,7 +7,25 @@ detailed 3D presentation and dynamic lighting. **Apple Silicon macOS only**
 (M1 and newer). All artwork, geometry and audio are original or generated
 at build/runtime — nothing is copied from any existing game.
 
-## Installing
+## Play in a browser
+
+`web/index.html` is the whole game as a **single self-contained HTML file** —
+no install, no build, no server. Open it in any browser with WebGL2 (current
+Safari, Chrome or Firefox) and play. It saves to `localStorage`, so closing
+the tab keeps your shelter.
+
+It is a real port, not a stripped-down demo: the same procedural-texture
+shading model (concrete, brick, rust, painted and brushed metal, tile, wood,
+fabric — all generated in the fragment shader, zero texture files), the same
+ACES filmic tonemap and colour grade, the same ray-traced shadows traced
+per-pixel against a box soup of rooms, and the same shelter economy
+(power/water/food/materials, staffing, morale, breakdowns, newcomers).
+
+Its functional tests run in headless Chromium — `tools/run_web_tests.sh`
+drives the real input handlers and simulation and checks 21 behaviours
+(build validation, click-to-build, production, save/load round-trip).
+
+## Installing the native macOS build
 
 The installer is a single self-contained **HTML page** in `dist/` — its
 filename is randomised on every build, so it will be something like
