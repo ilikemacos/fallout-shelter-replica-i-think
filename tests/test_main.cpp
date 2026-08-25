@@ -317,6 +317,42 @@ static void test_save_load_roundtrip(const std::string& dir) {
     (void)mgr.load(1, corruptLoad);
 }
 
+static void test_save_backup_rotation(const std::string& dir) {
+    // Regression test: writeAtomic() used to compute the backup path from
+    // slot 0 (not a real slot) for every numbered slot, so a save's ".bak"
+    // sibling was never actually written and restoreBackup()/corruption
+    // recovery silently did nothing for slots 1..6.
+    hv::save::SaveManager mgr(dir + "_backup");
+
+    World first;
+    first.newGame(1);
+    first.setShelterName("FirstSave");
+    CHECK(mgr.save(2, first));
+
+    World second;
+    second.newGame(2);
+    second.setShelterName("SecondSave");
+    CHECK(mgr.save(2, second));   // must rotate FirstSave's bytes into slot2.hvsave.bak
+
+    World loadedCurrent;
+    CHECK(mgr.load(2, loadedCurrent));
+    CHECK(loadedCurrent.shelterName() == "SecondSave");
+
+    // Corrupt the live slot; load() must fall back to the rotated backup.
+    const std::string path = dir + "_backup/slot2.hvsave";
+    std::FILE* f = std::fopen(path.c_str(), "r+b");
+    CHECK(f != nullptr);
+    if (f) {
+        std::fseek(f, 20, SEEK_SET);
+        const unsigned char garbage = 0xFF;
+        std::fwrite(&garbage, 1, 1, f);
+        std::fclose(f);
+    }
+    World recovered;
+    CHECK(mgr.load(2, recovered));
+    CHECK(recovered.shelterName() == "FirstSave");
+}
+
 static void test_job_system_parallel_for() {
     JobSystem js;
     js.start(4);
@@ -371,6 +407,37 @@ static void test_quest_progression() {
     if (q) CHECK(q->state == gameplay::QuestState::Complete || q->state == gameplay::QuestState::Claimed);
 }
 
+static void test_emergency_kill_count_not_duplicated() {
+    // Regression test: Encounter::residentKills() is a cumulative total for
+    // the whole fight, but the emergency handler used to re-award every
+    // already-counted kill on every tick the fight was still going, wildly
+    // inflating stats/quest progress/XP the longer a fight took to resolve.
+    World w;
+    w.newGame(2024);
+    CHECK(!w.residents().empty());
+    if (w.residents().empty()) return;
+    Resident& defender = w.residents().front();
+    defender.skills.set(Skill::Security, 10);
+    defender.weapon = ItemStack{itemIdByName("Breaker Cannon"), 1, 1.0f};
+    defender.outfit = ItemStack{itemIdByName("Warden Harness"), 1, 1.0f};
+
+    const std::vector<RoomId> entrances = w.shelter().roomsOfType(RoomType::Entrance);
+    CHECK(!entrances.empty());
+    if (entrances.empty()) return;
+    const u32 emergencyId = w.events().trigger(EventKind::Intrusion, w, entrances.front(), 1.0f);
+    CHECK(emergencyId != 0);
+    Emergency* e = w.events().find(emergencyId);
+    CHECK(e != nullptr);
+    if (e) e->responders.push_back(defender.id);
+
+    // Small steps so the fight spans many ticks rather than resolving in one.
+    for (int i = 0; i < 600 && w.events().activeCount() > 0; ++i) w.tick(0.1f);
+
+    // A single Intrusion spawns at most ~7 enemies (2 + severity<=3 + rng(0,2));
+    // a correct implementation never reports more kills than could exist.
+    CHECK(w.stats().enemiesDefeated <= 10);
+}
+
 int main() {
     test_math();
     test_rng_determinism();
@@ -386,9 +453,11 @@ int main() {
     test_job_system_parallel_for();
     test_expedition_lifecycle();
     test_quest_progression();
+    test_emergency_kill_count_not_duplicated();
 
     const char* tmp = std::getenv("TMPDIR");
     test_save_load_roundtrip(std::string(tmp ? tmp : "/tmp") + "/haven_test_saves");
+    test_save_backup_rotation(std::string(tmp ? tmp : "/tmp") + "/haven_test_saves");
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

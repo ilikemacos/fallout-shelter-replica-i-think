@@ -179,6 +179,24 @@ void EventSystem::tickEmergency(Emergency& e, f32 dt, World& world) {
             } else if (e.spreadTimer > 45.0f && fighters == 0) {
                 e.spreadTimer = 0.0f;
                 room->condition = std::max(0.0f, room->condition - 0.15f);
+                // Left unattended long enough, the fire can actually jump to
+                // an adjacent room — this used to just be a comment.
+                if (room->fire > 0.5f && world.rng().chance(0.4f)) {
+                    const Cell left{room->floor, room->colStart - 1};
+                    const Cell right{room->floor, room->colEnd() + 1};
+                    std::vector<Room*> spreadTargets;
+                    for (const Cell& c : {left, right}) {
+                        Room* neighbour = world.shelter().roomAt(c);
+                        if (neighbour && neighbour->buildProgress >= 1.0f &&
+                            neighbour->fire < 0.05f && !forRoom(neighbour->id))
+                            spreadTargets.push_back(neighbour);
+                    }
+                    if (!spreadTargets.empty()) {
+                        Room* target = spreadTargets[static_cast<size_t>(
+                            world.rng().rangeI(0, static_cast<i32>(spreadTargets.size()) - 1))];
+                        pendingFireSpread_.emplace_back(target->id, e.severity * 0.8f);
+                    }
+                }
             }
             break;
         }
@@ -227,9 +245,17 @@ void EventSystem::tickEmergency(Emergency& e, f32 dt, World& world) {
                         r->health = std::min(r->health, c.health);
 
             for (const auto& kv : e.fight.residentKills()) {
-                world.statsMutable().enemiesDefeated += static_cast<i32>(kv.second);
-                world.quests().notify(gameplay::ObjectiveKind::DefeatEnemies, 0, static_cast<f32>(kv.second));
-                if (Resident* r = world.resident(kv.first)) r->grantExperience(18.0f * static_cast<f32>(kv.second));
+                u32 already = 0;
+                for (auto& rp : e.reportedKills) if (rp.first == kv.first) { already = rp.second; break; }
+                const u32 delta = kv.second > already ? kv.second - already : 0;
+                if (delta > 0) {
+                    world.statsMutable().enemiesDefeated += static_cast<i32>(delta);
+                    world.quests().notify(gameplay::ObjectiveKind::DefeatEnemies, 0, static_cast<f32>(delta));
+                    if (Resident* r = world.resident(kv.first)) r->grantExperience(18.0f * static_cast<f32>(delta));
+                }
+                bool tracked = false;
+                for (auto& rp : e.reportedKills) if (rp.first == kv.first) { rp.second = kv.second; tracked = true; break; }
+                if (!tracked) e.reportedKills.emplace_back(kv.first, kv.second);
             }
             e.fight.clearEvents();
 
@@ -272,10 +298,24 @@ void EventSystem::tickEmergency(Emergency& e, f32 dt, World& world) {
 
 void EventSystem::tick(f32 dtSeconds, World& world) {
     sinceStart_ += dtSeconds;
+    pendingFireSpread_.clear();
     for (Emergency& e : emergencies_) if (!e.resolved) tickEmergency(e, dtSeconds, world);
     emergencies_.erase(std::remove_if(emergencies_.begin(), emergencies_.end(),
                                       [](const Emergency& e) { return e.resolved; }),
                        emergencies_.end());
+
+    // Applied here, after the loop above is done touching emergencies_, since
+    // trigger() can append to it and that would invalidate the loop's
+    // reference if done mid-iteration.
+    for (const auto& [roomId, severity] : pendingFireSpread_) {
+        if (forRoom(roomId)) continue;   // something else claimed it meanwhile
+        const u32 id = trigger(EventKind::Fire, world, roomId, severity);
+        if (id != 0) {
+            if (const Room* target = world.shelter().room(roomId))
+                world.notify("Fire is spreading into the " + std::string(roomTypeName(target->type)) + "!",
+                            NotifySeverity::Critical, roomId);
+        }
+    }
 
     if (trader_.active) {
         trader_.timeLeft -= dtSeconds;

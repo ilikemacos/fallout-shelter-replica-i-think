@@ -49,9 +49,13 @@ bool SaveManager::writeAtomic(const std::string& path, const std::vector<u8>& by
         HV_ERROR("Save: short write to %s", tmp.c_str());
         return false;
     }
-    // Keep one prior backup before the rename replaces it.
+    // Keep one prior backup before the rename replaces it — `path` is
+    // always some pathFor(slot), so its own ".bak" sibling is the right
+    // backup path; no need to (mis-)reconstruct the slot number.
     if (hv::paths::fileExists(path)) {
-        hv::paths::removeFile(backupPathFor(path == pathFor(kAutosaveSlot) ? kAutosaveSlot : 0));
+        const std::string bak = path + ".bak";
+        hv::paths::removeFile(bak);
+        hv::paths::renameFile(path, bak);
     }
     return hv::paths::renameFile(tmp, path);
 }

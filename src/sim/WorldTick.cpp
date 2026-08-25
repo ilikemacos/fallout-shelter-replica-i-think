@@ -158,6 +158,7 @@ void World::tickProduction(f32 dt) {
     }
 
     // --- everything else ----------------------------------------------------
+    f32 healCapacity = 0.0f;
     for (Room& r : shelter_.rooms()) {
         if (r.buildProgress < 1.0f) continue;
         const RoomDef& d = r.def();
@@ -237,18 +238,32 @@ void World::tickProduction(f32 dt) {
         }
 
         if (d.function == RoomFunction::Heal) {
-            // The infirmary tends anyone hurt in the shelter, not only those
-            // physically standing in it — the physical walk-in is a
-            // presentation detail, not a gate on care.
-            for (Resident& res : residents_) {
-                if (!res.alive() || res.expeditionId != 0) continue;
-                if (res.health >= res.effectiveMaxHealth() && res.radiation <= 0.0f) continue;
+            // Accumulated below and applied once after this loop — summing
+            // per-room here would let each extra infirmary heal (and bill
+            // medicine for) every patient again, stacking without bound.
+            healCapacity += 1.6f * (1.0f + 0.1f * static_cast<f32>(r.level));
+        }
+    }
+
+    if (healCapacity > 0.0f) {
+        // The infirmary(s) tend anyone hurt in the shelter, not only those
+        // physically standing in one — the physical walk-in is a
+        // presentation detail, not a gate on care. Total capacity is shared
+        // across everyone who needs it rather than each patient getting the
+        // full rate from every infirmary at once.
+        std::vector<Resident*> needCare;
+        for (Resident& res : residents_)
+            if (res.alive() && res.expeditionId == 0 &&
+                (res.health < res.effectiveMaxHealth() || res.radiation > 0.0f))
+                needCare.push_back(&res);
+        if (!needCare.empty()) {
+            const f32 perPatient = healCapacity / static_cast<f32>(needCare.size());
+            for (Resident* res : needCare) {
                 const f32 medicineWanted = dt * 0.02f;
                 if (resources_.spend(Resource::Medicine, medicineWanted)) {
                     flowConsumedAcc_[static_cast<int>(Resource::Medicine)] += medicineWanted;
-                    res.health = std::min(res.effectiveMaxHealth(),
-                                          res.health + dt * 1.6f * (1.0f + 0.1f * static_cast<f32>(r.level)));
-                    res.radiation = std::max(0.0f, res.radiation - dt * 0.35f);
+                    res->health = std::min(res->effectiveMaxHealth(), res->health + dt * perPatient);
+                    res->radiation = std::max(0.0f, res->radiation - dt * 0.35f);
                 }
             }
         }

@@ -50,6 +50,10 @@ struct Emergency {
     /// Combat-flavoured emergencies carry a live encounter.
     gameplay::Encounter fight;
     std::vector<ResidentId> responders;
+    /// Encounter::residentKills() is a cumulative total for the whole fight;
+    /// this tracks what's already been credited to stats/quests/XP so a
+    /// fight that spans many ticks doesn't re-award the same kills each tick.
+    std::vector<std::pair<ResidentId, u32>> reportedKills;
     bool hostile() const {
         return kind == EventKind::Intrusion || kind == EventKind::Infestation;
     }
@@ -98,6 +102,11 @@ private:
     EventKind rollEventKind(World& world);
 
     std::vector<Emergency> emergencies_;
+    /// Rooms a fire wants to spread into, queued during tickEmergency and
+    /// applied after the loop over emergencies_ finishes — trigger() can
+    /// grow emergencies_, which would invalidate the reference the loop is
+    /// currently iterating on if called mid-loop.
+    std::vector<std::pair<RoomId, f32>> pendingFireSpread_;
     TraderOffer trader_;
     u32 nextId_ = 1;
     f32 nextEventTimer_ = 90.0f;
