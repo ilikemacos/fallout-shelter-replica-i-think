@@ -75,6 +75,19 @@ uniform float uEmissive;
 uniform vec3  uAmbient;
 uniform sampler2D uAlbedoTex;
 uniform int   uHasAlbedoTex;
+uniform float uExposure;
+uniform float uFogDensity;
+uniform vec3  uFogColor;
+
+// Narkowicz's ACES fit: unlike Reinhard this rolls bright surfaces off
+// smoothly toward white instead of just dividing them down, while leaving
+// mid/low values — the ambient-lit walls and floors most of the screen is —
+// close to their input value, so shadowed surfaces keep visible colour
+// instead of crushing to black.
+vec3 acesFilm(vec3 x) {
+    const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
 
 struct Light {
     vec4 posType;      // xyz = position (or -direction for directional), w = type (0 dir,1 point,2 spot)
@@ -116,12 +129,22 @@ void main() {
     }
     result += base * uEmissive * vCustom.x;
 
-    // Tonemap + gamma-correct before writing to the (non-sRGB) default
-    // framebuffer. Without this the physically-linear lighting above —
-    // ambient around 0.3, most surfaces well under 1.0 — reads as almost
-    // solid black on screen: a linear 0.1 needs sRGB-encoding to ~0.35 to
-    // look like a dim-but-visible surface instead of "no render at all".
-    result = result / (result + vec3(1.0));
+    // Distance haze, tinted toward the ambient/fixture colour rather than a
+    // neutral grey, so far corridors recede into warm dark instead of a flat
+    // wall of black — atmospheric depth instead of a hard render cutoff.
+    float dist = length(uEyePos - vWorldPos);
+    float fog = 1.0 - exp(-dist * uFogDensity);
+    result = mix(result, uFogColor, clamp(fog, 0.0, 0.85));
+
+    // Exposure, then filmic tonemap + gamma-correct before writing to the
+    // (non-sRGB) default framebuffer. Without a tonemap at all, physically
+    // linear lighting reads as almost solid black on screen — a linear 0.1
+    // needs sRGB-encoding to ~0.35 to look dim-but-visible rather than
+    // "nothing rendered". The exposure multiplier then pushes the midtones
+    // up further so a lit shelter interior reads as bright, not merely
+    // technically non-black.
+    result *= uExposure;
+    result = acesFilm(result);
     result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
     FragColor = vec4(result, 1.0);
 }

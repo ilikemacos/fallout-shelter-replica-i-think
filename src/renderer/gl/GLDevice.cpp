@@ -370,7 +370,13 @@ void GLDevice::executePass(const CommandBuffer::Pass& pass) {
     // A dim underground bunker still needs enough fill light to read as
     // "dark and atmospheric" rather than "not rendering" — this is tuned
     // against the tonemap/gamma pass in the fragment shader, not raw.
-    glUniform3f(glGetUniformLocation(sceneShader_, "uAmbient"), 0.30f, 0.32f, 0.36f);
+    glUniform3f(glGetUniformLocation(sceneShader_, "uAmbient"), 0.52f, 0.55f, 0.60f);
+    glUniform1f(glGetUniformLocation(sceneShader_, "uExposure"), 1.6f);
+    glUniform1f(glGetUniformLocation(sceneShader_, "uFogDensity"), 0.028f);
+    // Warm amber haze, matching the industrial fixture colour, rather than a
+    // neutral grey — corridors recede into the shelter's own light instead
+    // of a generic fog wall.
+    glUniform3f(glGetUniformLocation(sceneShader_, "uFogColor"), 0.16f, 0.13f, 0.10f);
 
     const int lightCount = std::min<int>(static_cast<int>(pass.lights.size()), shaders::kMaxLights);
     glUniform1i(glGetUniformLocation(sceneShader_, "uLightCount"), lightCount);
