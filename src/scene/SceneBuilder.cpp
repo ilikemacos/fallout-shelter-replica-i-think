@@ -2,6 +2,7 @@
 #include "scene/Primitives.hpp"
 #include "core/Random.hpp"
 #include <cmath>
+#include <unordered_map>
 
 namespace hv::scene {
 namespace {
@@ -156,8 +157,10 @@ void SceneRenderer::render(CommandBuffer& cmd, const Frustum& frustum, const Mat
     }
     if (!floors.empty()) cmd.drawInstanced(meshes_.roomShellFloor, meshes_.concrete, floors);
 
-    // Machinery / furniture per room type, tinted and lightly animated.
-    std::vector<InstanceData> generic;
+    // Machinery / furniture, batched per room-type mesh (generator drums,
+    // water tanks, plant racks, bunks, ...) so each room actually shows the
+    // fixture that matches what it does, not one generic crate everywhere.
+    std::unordered_map<u32, std::vector<InstanceData>> byMesh;
     for (const RoomInstance& r : roomInstances_) {
         if (!frustum.intersects(r.bounds)) continue;
         InstanceData id; id.model = r.model;
@@ -165,9 +168,13 @@ void SceneRenderer::render(CommandBuffer& cmd, const Frustum& frustum, const Mat
         const f32 dim = r.broken ? 0.4f : (1.0f - r.fire * 0.3f);
         id.colorTint = Vec4{tint.x * dim, tint.y * dim, tint.z * dim, 1};
         id.customA = r.fire > 0.05f ? 1.0f : 0.0f;
-        generic.push_back(id);
+        const MeshHandle mesh = meshForRoom(meshes_, r.type);
+        byMesh[mesh.index].push_back(id);
     }
-    if (!generic.empty()) cmd.drawInstanced(meshes_.crateStack, meshes_.machineHousing, generic);
+    for (auto& [meshIndex, instances] : byMesh) {
+        const MeshHandle mesh{meshIndex, 1};
+        cmd.drawInstanced(mesh, meshes_.machineHousing, std::move(instances));
+    }
 
     // Residents, instanced per skin/outfit bucket to keep draw calls low even
     // with hundreds on screen.

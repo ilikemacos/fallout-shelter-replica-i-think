@@ -40,8 +40,8 @@ private:
     void renderRoomInspector();
     void renderNotifications();
     void applyGraphicsSettings();
-    Cell pickCell() const;
-    RoomId pickRoom() const;
+    sim::Cell pickCell() const;
+    sim::RoomId pickRoom() const;
 
     Settings settings_;
     std::unique_ptr<platform::Window> window_;
@@ -63,8 +63,8 @@ private:
 
     BuildMode buildMode_ = BuildMode::None;
     sim::RoomType selectedRoomType_ = sim::RoomType::Corridor;
-    RoomId selectedRoom_ = sim::kNoRoom;
-    ResidentId selectedResident_ = sim::kNoResident;
+    sim::RoomId selectedRoom_ = sim::kNoRoom;
+    sim::ResidentId selectedResident_ = sim::kNoResident;
     f32 autosaveTimer_ = 0.0f;
     bool wasPausedByFocusLoss_ = false;
     f64 lastFrameTime_ = 0.0;

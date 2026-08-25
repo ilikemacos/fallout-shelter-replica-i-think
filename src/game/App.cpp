@@ -245,7 +245,7 @@ void App::renderFrame(f32 dt) {
         fixture.position = room.worldCenter() + Vec3{0, kFloorHeight * 0.85f, 0};
         const bool emergency = room.fire > 0.05f || room.broken;
         fixture.color = emergency ? Vec3{0.9f, 0.35f, 0.25f} : Vec3{1.0f, 0.78f, 0.5f};
-        fixture.intensity = flickerIntensity(world_.gameTimeSeconds(), room.broken ? 6.0f : 0.0f,
+        fixture.intensity = gfx::flickerIntensity(world_.gameTimeSeconds(), room.broken ? 6.0f : 0.0f,
                                             room.broken ? 0.6f : 0.0f, room.id) *
                             (room.powerSatisfaction * 1.5f + 0.3f);
         fixture.range = kCellWidth * static_cast<f32>(room.width) * 0.9f;
