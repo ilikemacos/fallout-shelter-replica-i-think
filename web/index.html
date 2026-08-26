@@ -367,6 +367,7 @@ uniform float uMetallic, uRoughness, uEmissive, uExposure, uFogDensity;
 uniform float uSaturation, uContrast, uVignette;
 uniform vec2 uViewport;
 uniform int uSurfaceKind, uLightCount, uBoxCount, uRayShadows;
+uniform float uLodBias;
 uniform vec4 uLightPT[${MAX_LIGHTS}];   // xyz pos/-dir, w type (0 dir,1 point)
 uniform vec4 uLightCI[${MAX_LIGHTS}];   // rgb colour, a intensity
 uniform vec4 uLightPar[${MAX_LIGHTS}];  // x range
@@ -432,33 +433,38 @@ vec2 bond(vec2 uv, vec2 cell, float joint){
 }
 // 'cheap' keeps only the high-frequency octaves, which is all the bump
 // gradient depends on — three fewer full noise stacks per pixel.
-float height(vec3 p, vec3 n, int kind, bool cheap){
-  if(kind==0) return cheap? fbm(p*9.0,2) : fbm(p*1.1,3)*0.6 + fbm(p*9.0,3)*0.4;
+// 'q' is an octave budget: octaves run low-to-high, so spending fewer of
+// them on a distant surface drops only detail that is already sub-pixel.
+float height(vec3 p, vec3 n, int kind, bool cheap, int q){
+  if(kind==0) return cheap? fbm(p*9.0,q>=3?2:1) : fbm(p*1.1,min(3,q))*0.6 + fbm(p*9.0,min(3,q))*0.4;
   else if(kind==1){ vec2 b=bond(triCoords(p,n),vec2(0.62,0.26),0.035);
-    return cheap? b.x*0.85+fbm(p*14.0,1)*0.15 : b.x*0.85+fbm(p*14.0,2)*0.15+b.y*0.05; }
-  else if(kind==2) return cheap? fbm(p*22.0,2) : fbm(p*3.0,3)*0.5 + fbm(p*22.0,3)*0.5;
+    return cheap? b.x*0.85+fbm(p*14.0,1)*0.15 : b.x*0.85+fbm(p*14.0,min(2,q))*0.15+b.y*0.05; }
+  else if(kind==2) return cheap? fbm(p*22.0,q>=3?2:1) : fbm(p*3.0,min(3,q))*0.5 + fbm(p*22.0,min(3,q))*0.5;
   else if(kind==3){ vec2 b=bond(triCoords(p,n),vec2(1.6,1.1),0.03);
-    return b.x*0.7 + fbm(p*20.0, cheap?1:2)*0.3; }
+    return b.x*0.7 + fbm(p*20.0, cheap?1:min(2,q))*0.3; }
   else if(kind==4){ vec2 b=bond(triCoords(p,n),vec2(0.34,0.34),0.028);
-    return cheap? b.x*0.9 : b.x*0.9+fbm(p*30.0,2)*0.1; }
+    return cheap? b.x*0.9 : b.x*0.9+fbm(p*30.0,min(2,q))*0.1; }
   else if(kind==5){ vec2 uv=triCoords(p,n);
-    return cheap? fbm(vec3(uv.x*60.0,uv.y*2.0,0.0),2)
-                : fbm(vec3(uv.x*60.0,uv.y*2.0,0.0),3)*0.7 + fbm(p*25.0,2)*0.3; }
+    return cheap? fbm(vec3(uv.x*60.0,uv.y*2.0,0.0),q>=3?2:1)
+                : fbm(vec3(uv.x*60.0,uv.y*2.0,0.0),min(3,q))*0.7 + fbm(p*25.0,min(2,q))*0.3; }
   else if(kind==6){ vec2 uv=triCoords(p,n);
-    return sin(uv.y*26.0 + fbm(p*2.0, cheap?2:3)*7.0)*0.5+0.5; }
+    return sin(uv.y*26.0 + fbm(p*2.0, cheap?2:min(3,q))*7.0)*0.5+0.5; }
   else if(kind==7){ vec2 uv=triCoords(p,n)*90.0; return sin(uv.x)*sin(uv.y)*0.5+0.5; }
-  else if(kind==11) return fbm(p*60.0, cheap?1:2)*0.5+0.5;
-  return fbm(p*12.0, cheap?1:2)*0.5+0.5;
+  else if(kind==11) return fbm(p*60.0, cheap?1:min(2,q))*0.5+0.5;
+  return fbm(p*12.0, cheap?1:min(2,q))*0.5+0.5;
 }
-vec3 bumpNormal(vec3 n, vec3 p, int kind, float strength){
+// The perturbation only ever uses the in-plane part of the height gradient,
+// so sample along the two tangents instead of the three world axes: three
+// noise taps per pixel instead of four, for the same normal.
+vec3 bumpNormal(vec3 n, vec3 p, int kind, float strength, int q){
   if(strength<=0.0) return n;
   float e=0.012;
-  float h  = height(p,n,kind,true);
-  float hx = height(p+vec3(e,0,0),n,kind,true);
-  float hy = height(p+vec3(0,e,0),n,kind,true);
-  float hz = height(p+vec3(0,0,e),n,kind,true);
-  vec3 g = vec3(hx-h,hy-h,hz-h)/e;
-  g -= n*dot(n,g);
+  vec3 t = abs(n.y)<0.99 ? normalize(cross(vec3(0.0,1.0,0.0), n)) : vec3(1.0,0.0,0.0);
+  vec3 b = cross(n,t);
+  float h  = height(p,      n,kind,true,q);
+  float ht = height(p+t*e,  n,kind,true,q);
+  float hb = height(p+b*e,  n,kind,true,q);
+  vec3 g = (t*(ht-h) + b*(hb-h))/e;
   return normalize(n - g*strength);
 }
 bool insideBox(vec3 p, vec3 lo, vec3 hi){
@@ -489,13 +495,20 @@ void main(){
   vec3 tint = uAlbedo * vTint.rgb;
   int kind = uSurfaceKind;
 
-  float h = height(P,Ng,kind,false);
+  // Distance LOD. Every optional detail term is multiplied by lod, so it
+  // has already faded to nothing by the time the cheaper path takes over --
+  // the switch costs frames, never a visible pop.
+  float dist0 = length(uEye-vWorld);
+  float lod = (1.0 - smoothstep(26.0, 62.0, dist0)) * uLodBias;
+  int q = lod>0.55 ? 3 : (lod>0.05 ? 2 : 1);
+  bool cell = lod > 0.02;          // worley is 27 hashes; skip it once faded
+
+  float h = height(P,Ng,kind,false,q);
   vec3 albedo=tint; float rough=uRoughness, metal=uMetallic, ao=1.0;
 
   if(kind==0){                                   // concrete
-    vec2 w=worley(P*13.0);
-    float agg=smoothstep(0.22,0.0,w.x);
-    float stain=smoothstep(0.15,0.75, fbm(P*0.8,4)*0.5+0.5);
+    float agg = cell? smoothstep(0.22,0.0,worley(P*13.0).x)*lod : 0.0;
+    float stain=smoothstep(0.15,0.75, fbm(P*0.8,min(4,q+1))*0.5+0.5);
     float grime=smoothstep(0.6,0.0,h);
     albedo = tint*(0.68+0.44*h);
     albedo = mix(albedo, tint*1.18, agg*0.40);
@@ -505,18 +518,18 @@ void main(){
     ao = 1.0-grime*0.6;
   } else if(kind==1){                            // brick
     vec2 b=bond(triCoords(P,Ng),vec2(0.62,0.26),0.035);
-    vec3 br=tint*(0.72+0.55*b.y)*(0.85+0.3*fbm(P*18.0,3));
-    albedo=mix(vec3(0.44,0.43,0.40)*(0.8+0.4*fbm(P*25.0,2)), br, b.x);
+    vec3 br=tint*(0.72+0.55*b.y)*(0.85+0.3*fbm(P*18.0,min(3,q)));
+    albedo=mix(vec3(0.44,0.43,0.40)*(0.8+0.4*fbm(P*25.0,min(2,q))), br, b.x);
     rough=mix(0.95,0.82,b.x); ao=mix(0.55,1.0,b.x);
   } else if(kind==2){                            // rusted metal
-    float ox=smoothstep(0.30,0.72, fbm(P*6.5,4)*0.5+0.5);
-    float pit=smoothstep(0.24,0.0, worley(P*26.0).x);
+    float ox=smoothstep(0.30,0.72, fbm(P*6.5,min(4,q+1))*0.5+0.5);
+    float pit=cell? smoothstep(0.24,0.0, worley(P*26.0).x)*lod : 0.0;
     albedo=mix(vec3(0.38,0.39,0.42), tint*vec3(1.02,0.68,0.46), clamp(ox+pit*0.45,0.0,1.0));
     albedo*=0.75+0.5*h; metal=mix(0.85,0.08,ox); rough=mix(0.38,0.95,ox); ao=1.0-pit*0.4;
   } else if(kind==3){                            // painted metal, chipping
     vec2 b=bond(triCoords(P,Ng),vec2(1.6,1.1),0.03);
-    float wear=smoothstep(0.55,0.95, fbm(P*7.0,4)*0.5+0.5);
-    albedo=mix(tint*(0.9+0.25*fbm(P*16.0,2)), vec3(0.40,0.41,0.44), wear*0.8);
+    float wear=smoothstep(0.55,0.95, fbm(P*7.0,min(4,q+1))*0.5+0.5);
+    albedo=mix(tint*(0.9+0.25*fbm(P*16.0,min(2,q))), vec3(0.40,0.41,0.44), wear*0.8);
     albedo=mix(albedo*0.5, albedo, b.x);
     metal=mix(0.15,0.8,wear); rough=mix(0.55,0.42,wear); ao=mix(0.6,1.0,b.x);
   } else if(kind==4){                            // tile
@@ -526,7 +539,7 @@ void main(){
   } else if(kind==5){                            // brushed metal
     albedo=tint*(0.8+0.35*h); metal=0.85; rough=clamp(0.30+0.25*h,0.05,1.0);
   } else if(kind==6){                            // wood
-    float knot=smoothstep(0.72,1.0, fbm(P*3.5,3)*0.5+0.5);
+    float knot=smoothstep(0.72,1.0, fbm(P*3.5,min(3,q))*0.5+0.5);
     albedo=mix(tint*(0.62+0.5*h), tint*0.42, knot);
     rough=0.78-0.1*h; ao=1.0-knot*0.3;
   } else if(kind==7){                            // fabric
@@ -535,9 +548,10 @@ void main(){
   else if(kind==11){ albedo=tint*(0.94+0.1*h); rough=0.68; }
   else if(kind==12){ albedo=tint; rough=0.35; }
 
-  float viewDist=length(uEye-vWorld);
-  float detail=1.0-smoothstep(18.0,55.0,viewDist);
-  vec3 N = detail>0.01 ? bumpNormal(Ng,P,kind,0.028*detail) : Ng;
+  float viewDist=dist0;
+  // micro-relief is sub-pixel well before the old 55m cut-off
+  float detail=(1.0-smoothstep(16.0,44.0,viewDist))*uLodBias;
+  vec3 N = detail>0.01 ? bumpNormal(Ng,P,kind,0.028*detail,q) : Ng;
 
   // sky-and-bounce ambient, not one flat number
   vec3 result = albedo * mix(uAmbGnd, uAmbSky, N.y*0.5+0.5) * ao;
@@ -1054,7 +1068,7 @@ gl.useProgram(prog);
 const U={};
 for(const n of ['uView','uProj','uEye','uAlbedo','uAmbSky','uAmbGnd','uFogCol','uShadowTint',
   'uHighTint','uMetallic','uRoughness','uEmissive','uExposure','uFogDensity','uSaturation',
-  'uContrast','uVignette','uViewport','uSurfaceKind','uLightCount','uBoxCount','uRayShadows',
+  'uContrast','uVignette','uViewport','uLodBias','uSurfaceKind','uLightCount','uBoxCount','uRayShadows',
   'uLightPT','uLightCI','uLightPar','uBoxMin','uBoxMax'])
   U[n]=gl.getUniformLocation(prog,n);
 
@@ -1280,8 +1294,16 @@ const MESH_OF={drum:'drum',tank:'tank',rack:'rack',bunk:'bunk',bench:'bench',
                crate:'crate',desk:'desk',bed:'bed',lift:'lift'};
 const WHITE=[1,1,1];
 
+// Three presets, plus an adaptive resolution scale on top of them. The
+// shading is procedural and fragment-bound, so pixels are the lever that
+// actually matters on a laptop GPU.
+const QUAL=[{n:'FAST', full:'Fast',     rt:0, lod:0.45, cap:0.70},
+            {n:'FINE', full:'Balanced', rt:1, lod:1.00, cap:1.00},
+            {n:'MAX',  full:'Maximum',  rt:2, lod:1.00, cap:1.30}];
+let rscale=1;
 function render(w,dt){
-  const dpr=Math.min(window.devicePixelRatio||1, 2);
+  const Q=QUAL[quality];
+  const dpr=Math.min(window.devicePixelRatio||1, 1.5)*Q.cap*rscale;
   const cw=Math.floor(canvas.clientWidth*dpr), ch=Math.floor(canvas.clientHeight*dpr);
   if(canvas.width!==cw||canvas.height!==ch){ canvas.width=cw; canvas.height=ch; }
   gl.viewport(0,0,canvas.width,canvas.height);
@@ -1302,6 +1324,7 @@ function render(w,dt){
   gl.uniform1f(U.uSaturation,TONE.saturation); gl.uniform1f(U.uContrast,TONE.contrast);
   gl.uniform1f(U.uVignette,TONE.vignette);
   gl.uniform2f(U.uViewport,canvas.width,canvas.height);
+  gl.uniform1f(U.uLodBias,Q.lod);
 
   // lights: one angled key + the nearest room fixtures
   const pt=[], ci=[], par=[];
@@ -1332,7 +1355,7 @@ function render(w,dt){
   boxes.forEach((x,i)=>{ bmin.set(x.b.lo,i*3); bmax.set(x.b.hi,i*3); });
   gl.uniform1i(U.uBoxCount,boxes.length);
   gl.uniform3fv(U.uBoxMin,bmin); gl.uniform3fv(U.uBoxMax,bmax);
-  gl.uniform1i(U.uRayShadows, quality>=2?2:(quality>=1?1:0));
+  gl.uniform1i(U.uRayShadows, Q.rt);
 
   // --- room shells: floor slab, back wall, side pillars, ceiling lintel ---
   for(const r of w.rooms){
@@ -1560,12 +1583,14 @@ function updateTop(){
     };
     $('bq').onclick=()=>{
       quality=(quality+1)%3;
-      $('bq').textContent=['RT OFF','RT LIGHT','RT LOW'][quality];
-      $('bq').className='tbtn'+(quality?' on':'');
+      rscale=1;                       // let the adaptive scaler re-settle
+      $('bq').textContent=QUAL[quality].n;
+      $('bq').className='tbtn'+(quality>1?' on':'');
+      toast('Quality: '+QUAL[quality].full);
     };
     $('bfp').onclick=()=>{ if(fp) exitFP(); else enterFP(world); };
     $('bdwell').onclick=()=>showRoster(!rosterOpen);
-    $('bq').textContent='RT LIGHT'; $('bq').className='tbtn on';
+    $('bq').textContent=QUAL[quality].n; $('bq').className='tbtn';
   }
   $('vno').textContent=world.vaultNo;
   for(const i of [R_POWER,R_WATER,R_FOOD]){
@@ -1616,15 +1641,21 @@ function updateLabels(){
     el.style.left=((sx*0.5+0.5)*W).toFixed(0)+'px';
     el.style.top =((0.5-sy*0.5)*H).toFixed(0)+'px';
     const d=roomDef(r.def), slots=roomSlots(r);
-    let pips=''; for(let i=1;i<=3;i++) pips+='<i class="'+(i<=r.lvl?'on':'')+'"></i>';
     let st;
     if(r.progress<1) st=Math.round(r.progress*100)+'%';
     else if(r.broken) st='BROKEN';
     else if(slots>0) st=r.staff.length+'/'+slots;
     else st='';
-    el.className='rl'+((r.broken||(r.progress>=1&&r.cond<0.35))?' bad':'');
-    el.innerHTML='<b>'+d.name+'</b><span class="pips">'+pips+'</span>'+
-      (st?'<span class="st">'+st+'</span>':'');
+    // Rebuilding this markup every frame costs a full style recalc per room;
+    // the position is the only part that changes on most frames.
+    const key=r.lvl+'|'+st+'|'+(r.broken||r.cond<0.35?1:0);
+    if(el.dataset.k!==key){
+      el.dataset.k=key;
+      let pips=''; for(let i=1;i<=3;i++) pips+='<i class="'+(i<=r.lvl?'on':'')+'"></i>';
+      el.className='rl'+((r.broken||(r.progress>=1&&r.cond<0.35))?' bad':'');
+      el.innerHTML='<b>'+d.name+'</b><span class="pips">'+pips+'</span>'+
+        (st?'<span class="st">'+st+'</span>':'');
+    }
   }
   for(const [id,el] of labelEls){ if(!live.has(id)){ el.remove(); labelEls.delete(id); } }
 }
@@ -1860,6 +1891,7 @@ function frame(t){
 
   tick(world,dt);
   if(fp) fpUpdate(world,dt); else camUpdate(dt);
+  if(document.hidden) return;      // simulate in a background tab, don't draw
   render(world,dt);
 
   if(toastT>0){ toastT-=dt; if(toastT<=0) $('toast').style.opacity='0'; }
@@ -1871,8 +1903,13 @@ function frame(t){
 
   fpsAcc+=dt; fpsN++;
   if(fpsAcc>0.5){
-    $('fps').textContent=Math.round(fpsN/fpsAcc)+' fps · '+stats.draws+' draws · '+
-      (stats.tris/1000).toFixed(1)+'k tris';
+    const fps=fpsN/fpsAcc, ms=1000/Math.max(fps,1);
+    // Hold ~60fps by trading resolution, the one knob with no gameplay cost.
+    if(ms>19 && rscale>0.55) rscale=Math.max(0.55, rscale-0.08);
+    else if(ms<13.5 && rscale<1) rscale=Math.min(1, rscale+0.05);
+    $('fps').textContent=Math.round(fps)+' fps · '+stats.draws+' draws · '+
+      (stats.tris/1000).toFixed(1)+'k tris'+
+      (rscale<0.995? ' · '+Math.round(rscale*100)+'%' : '');
     fpsAcc=0; fpsN=0;
   }
   saveT+=dt;

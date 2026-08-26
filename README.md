@@ -32,6 +32,12 @@ ACES filmic tonemap and colour grade, the same ray-traced shadows traced
 per-pixel against a box soup of rooms, and the same shelter economy
 (power/water/food/materials, staffing, morale, breakdowns, newcomers).
 
+The shading is procedural and so entirely fragment-bound, which makes pixels
+the lever that matters: the page renders at a capped device pixel ratio and
+scales resolution adaptively to hold ~60fps, and the quality button cycles
+Fast / Balanced / Maximum (ray-traced shadows off, light, low, with matching
+detail and resolution budgets). The fps readout shows the scale in use.
+
 Its functional tests run in headless Chromium — `tools/run_web_tests.sh`
 drives the real input handlers and simulation and checks 28 behaviours
 (build validation, click-to-build, production, save/load round-trip,
