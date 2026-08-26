@@ -27,14 +27,14 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:
   margin:-1px -1px 9px;padding:5px 11px;border-radius:5px 5px 0 0;font-weight:bold}
 
 /* top HUD */
-#top{position:absolute;top:0;left:0;right:0;height:60px;display:flex;align-items:center;gap:7px;
+#top{position:absolute;top:0;left:0;right:0;height:60px;display:flex;align-items:center;gap:6px;
   padding:0 10px;background:linear-gradient(180deg,#22363f,#141f25 70%,#0e161a);
   border-bottom:2px solid var(--line);box-shadow:0 3px 14px rgba(0,0,0,.6);
   overflow-x:auto;scrollbar-width:none}
 #top::-webkit-scrollbar{display:none}
-#vault{display:flex;align-items:center;gap:8px;padding-right:10px;
+#vault{display:flex;align-items:center;gap:7px;padding-right:8px;
   border-right:2px solid var(--line);margin-right:3px;flex:none}
-#vault .disc{width:38px;height:38px;border-radius:50%;flex:none;
+#vault .disc{width:34px;height:34px;border-radius:50%;flex:none;
   background:radial-gradient(circle at 34% 30%,#4a6d7c,#16242b 72%);
   border:2px solid var(--line2);display:flex;align-items:center;justify-content:center;
   color:var(--gold);font-weight:bold;font-size:13px;box-shadow:inset 0 0 9px rgba(0,0,0,.7)}
@@ -43,10 +43,10 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:
 #vault .clk{font-size:9.5px;color:var(--dim);letter-spacing:.08em;line-height:1.2}
 .meter{display:flex;align-items:center;gap:7px;flex:none;background:rgba(0,0,0,.32);
   border:1px solid var(--line);border-radius:6px;padding:5px 8px 5px 6px}
-.meter .ico{width:24px;height:24px;border-radius:5px;flex:none;display:flex;align-items:center;
+.meter .ico{width:22px;height:22px;border-radius:5px;flex:none;display:flex;align-items:center;
   justify-content:center;font-size:11px;font-weight:bold;color:#0d1418;
   box-shadow:inset 0 -2px 4px rgba(0,0,0,.35)}
-.meter .body{min-width:82px}
+.meter .body{min-width:56px}
 .meter .top{display:flex;justify-content:space-between;gap:10px;font-size:10px;
   letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
 .meter .val{color:var(--text);font-weight:bold;letter-spacing:0;font-size:11.5px}
@@ -60,15 +60,45 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:
   background:rgba(0,0,0,.32);border:1px solid var(--line);border-radius:6px}
 .tag .k{font-size:9.5px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase}
 .tag .v{font-weight:bold;font-size:14px;color:var(--gold)}
-#tools{margin-left:auto;display:flex;gap:5px;align-items:center;padding-left:8px;flex:none;
+/* stock counters share one plate so the bar still fits a 1280px window */
+.tag.multi{gap:0}
+.tag.multi>div{display:flex;flex-direction:column;align-items:center;padding:0 7px;
+  border-left:1px solid rgba(255,255,255,.09)}
+.tag.multi>div:first-child{border-left:0;padding-left:1px}
+.tag.multi .v{font-size:12.5px}
+#tools{margin-left:auto;display:flex;gap:4px;align-items:center;padding-left:8px;flex:none;
   position:sticky;right:0;background:linear-gradient(90deg,transparent,#16232a 14px)}
 .tbtn{font:inherit;font-size:11px;font-weight:bold;cursor:pointer;color:var(--text);white-space:nowrap;
   background:linear-gradient(180deg,var(--steel3),var(--steel));border:1px solid var(--line2);
-  border-radius:5px;padding:7px 9px;letter-spacing:.05em;
+  border-radius:5px;padding:7px 8px;letter-spacing:.04em;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
 .tbtn:hover{background:linear-gradient(180deg,#3a5c6b,var(--steel2))}
 .tbtn.on{background:linear-gradient(180deg,var(--gold),var(--gold2));color:var(--goldink);
   border-color:var(--gold2)}
+
+/* vault happiness pill */
+#happy{display:flex;align-items:center;gap:7px;padding:4px 11px 4px 5px;flex:none;
+  background:rgba(0,0,0,.32);border:1px solid var(--line);border-radius:20px}
+#happy .face{width:26px;height:26px;border-radius:50%;flex:none;display:flex;
+  align-items:center;justify-content:center;font-size:14px;color:#20303a;font-weight:bold;
+  background:var(--green);box-shadow:inset 0 -2px 4px rgba(0,0,0,.3)}
+#happy .n{font-weight:bold;font-size:14px;color:var(--gold)}
+#happy .k{font-size:9.5px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase}
+
+/* dweller roster */
+#dwell{position:absolute;left:14px;top:72px;width:262px;padding:0 0 8px;display:none}
+#dwell .in{padding:0 8px;max-height:calc(100vh - 190px);overflow-y:auto}
+.dw{display:flex;align-items:center;gap:8px;padding:6px 7px;border-radius:5px;cursor:pointer;
+  border:1px solid transparent}
+.dw:hover{background:rgba(255,255,255,.05);border-color:var(--line)}
+.dw .av{width:24px;height:24px;border-radius:50%;flex:none;border:1px solid var(--line2)}
+.dw .who{flex:1;min-width:0}
+.dw .nm{font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dw .jb{font-size:9.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dw .jb.idle{color:var(--amber)}
+.dw .sk{font-size:10px;color:var(--gold);font-weight:bold;flex:none}
+.dw .hp{width:34px;flex:none}
+.dw .hp .bar{margin:0}
 
 /* floating room name plates */
 #labels{position:absolute;inset:0;overflow:hidden}
@@ -176,6 +206,7 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:
   <div id="labels"></div>
   <div id="tray" class="pnl"><div class="hdr">Build a room</div><div class="grid" id="rooms"></div></div>
   <button id="buildbtn" class="tbtn">BUILD</button>
+  <div id="dwell" class="pnl"><div class="hdr">Dwellers</div><div class="in" id="dwlist"></div></div>
   <div id="insp" class="pnl"></div>
   <div id="log" class="pnl"><div class="hdr">Vault log</div><div class="in" id="notes"></div></div>
   <div id="mode" class="pnl"></div>
@@ -186,6 +217,8 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:
     <span><b>LMB</b> select / place</span>
     <span><b>RMB</b> orbit</span>
     <span><b>Wheel</b> zoom</span>
+    <span><b>B</b> build</span>
+    <span><b>C</b> dwellers</span>
     <span><b>Tab</b> walk inside</span>
     <span><b>Esc</b> cancel</span>
     <span id="fps"></span>
@@ -1147,7 +1180,7 @@ function enterFP(w){
   document.getElementById('cross').style.display='block';
   document.getElementById('fpinfo').style.display='block';
   document.getElementById('insp').style.display='none';
-  buildMode=null; selRoom=null; updateMode(); showTray(false);
+  buildMode=null; selRoom=null; updateMode(); showTray(false); showRoster(false);
   document.getElementById('buildbtn').style.display='none';
   canvas.requestPointerLock && canvas.requestPointerLock();
 }
@@ -1221,7 +1254,9 @@ const stats={draws:0,tris:0};
 <script>
 "use strict";
 // ---- rendering ------------------------------------------------------------
-const SKIN=[0xC98E63,0xE8B98A,0x8D5A3C,0x6A4A33,0xF2CBA0,0x8A5C3E].map(hexLin);
+// Kept in raw hex too, so the dweller roster can tint its avatars to match.
+const SKINHEX=[0xC98E63,0xE8B98A,0x8D5A3C,0x6A4A33,0xF2CBA0,0x8A5C3E];
+const SKIN=SKINHEX.map(hexLin);
 const OUTFIT=[0x3E4A42,0x44403A,0x3A4048,0x4A3E38].map(hexLin);
 const buf=new Float32Array(INSTANCE_FLOATS*512);
 let bufN=0;
@@ -1432,6 +1467,44 @@ function showTray(v){
   $('buildbtn').textContent=trayOpen?'CLOSE':'BUILD';
   if(trayOpen) buildPalette();
 }
+// Dweller roster: who is in the vault, what they are posted to, and how they
+// are holding up. Clicking one selects the room they work in.
+let rosterOpen=false, rosterT=0;
+function showRoster(v){
+  rosterOpen=!!v;
+  $('dwell').style.display=rosterOpen?'block':'none';
+  const b=$('bdwell'); if(b) b.className='tbtn'+(rosterOpen?' on':'');
+  if(rosterOpen) updateRoster();
+}
+function updateRoster(){
+  if(!rosterOpen||!world) return;
+  const host=$('dwlist');
+  // idle first, then unhappiest, so whoever needs attention is at the top
+  const list=world.people.slice().sort((a,b)=>(a.job?1:0)-(b.job?1:0)||a.happy-b.happy);
+  host.innerHTML=list.map(p=>{
+    const r=p.job? world.rooms.find(x=>x.id===p.job) : null;
+    const job=r? roomDef(r.def).name+' &middot; L'+(r.floor+1) : 'Idle';
+    const col=p.happy>=70?'var(--green)':p.happy>=45?'var(--amber)':'var(--red)';
+    return '<div class="dw" data-p="'+p.id+'">'+
+      '<div class="av" style="background:'+hexCss(SKINHEX[p.skin%SKINHEX.length])+'"></div>'+
+      '<div class="who"><div class="nm">'+p.name+'</div>'+
+      '<div class="jb'+(r?'':' idle')+'">'+job+'</div></div>'+
+      '<div class="sk">S'+p.skill+'</div>'+
+      '<div class="hp"><div class="bar"><i style="width:'+Math.round(p.happy)+'%;background:'+col+'"></i></div></div>'+
+      '</div>';
+  }).join('') || '<div class="note">Nobody left.</div>';
+  for(const el of host.children){
+    const id=+el.dataset.p; if(!id) continue;
+    el.onclick=()=>{
+      const p=world.people.find(x=>x.id===id);
+      if(!p) return;
+      if(!p.job){ toast(p.name+' has no post'); return; }
+      selRoom=p.job; uiInspDirty=true;
+      const r=world.rooms.find(x=>x.id===p.job);
+      if(r&&!fp){ const c=roomCenter(r); cam.tfx=c.x; cam.tfy=c.y-1; }
+    };
+  }
+}
 function updateMode(){
   const m=$('mode');
   if(buildMode){
@@ -1460,11 +1533,19 @@ function updateTop(){
         '<div class="lbl">Vault</div><div class="num" id="vno">---</div>'+
         '<div class="clk" id="tday">DAY 1</div></div></div>'+
       meter(R_POWER,'P')+meter(R_WATER,'W')+meter(R_FOOD,'F')+
-      tag('Pop','tpop')+tag('Mat','tmat')+tag('Med','tmed')+tag('Caps','tcap')+
+      '<div id="happy"><div class="face" id="hface">:)</div><div>'+
+        '<div class="k">Happy</div><div class="n" id="hnum">--%</div></div></div>'+
+      tag('Pop','tpop')+
+      '<div class="tag multi">'+
+        '<div><span class="k">Mat</span><span class="v" id="tmat">0</span></div>'+
+        '<div><span class="k">Med</span><span class="v" id="tmed">0</span></div>'+
+        '<div><span class="k">Caps</span><span class="v" id="tcap">0</span></div>'+
+      '</div>'+
       '<div id="tools">'+
         '<button class="tbtn" id="bspeed">1x</button>'+
         '<button class="tbtn" id="bstaff">STAFF</button>'+
-        '<button class="tbtn" id="bfp">WALK IN</button>'+
+        '<button class="tbtn" id="bdwell">CREW</button>'+
+        '<button class="tbtn" id="bfp">WALK</button>'+
         '<button class="tbtn" id="bq">RT</button></div>';
     host.dataset.init='1';
     $('bspeed').onclick=()=>{
@@ -1483,6 +1564,7 @@ function updateTop(){
       $('bq').className='tbtn'+(quality?' on':'');
     };
     $('bfp').onclick=()=>{ if(fp) exitFP(); else enterFP(world); };
+    $('bdwell').onclick=()=>showRoster(!rosterOpen);
     $('bq').textContent='RT LIGHT'; $('bq').className='tbtn on';
   }
   $('vno').textContent=world.vaultNo;
@@ -1496,6 +1578,12 @@ function updateTop(){
     // Colour follows scarcity, not the resource, so a shortfall reads instantly.
     bar.style.background = f<0.12? 'var(--red)' : f<0.30? 'var(--amber)' : hexCss(RES[i].c);
   }
+  // Vault happiness, the way the overseer's terminal leads with it.
+  const hp=avgHappy(world);
+  $('hnum').textContent=Math.round(hp)+'%';
+  const face=$('hface');
+  face.textContent = hp>=70? ':)' : hp>=45? ':|' : ':(';
+  face.style.background = hp>=70? 'var(--green)' : hp>=45? 'var(--amber)' : 'var(--red)';
   $('tpop').textContent=population(world)+'/'+housing(world);
   $('tmat').textContent=Math.floor(world.res[R_MAT]);
   $('tmed').textContent=Math.floor(world.res[R_MED]);
@@ -1628,6 +1716,10 @@ addEventListener('keydown',e=>{
   if(e.code==='Escape'){
     if(fp){ exitFP(); return; }
     buildMode=null; selRoom=null; buildPalette(); updateMode(); showTray(false); uiInspDirty=true;
+  }
+  if(!fp&&running){
+    if(e.code==='KeyB'){ showTray(!trayOpen); return; }
+    if(e.code==='KeyC'){ showRoster(!rosterOpen); return; }
   }
   if(e.code==='Space'){ e.preventDefault(); world.paused=!world.paused;
     $('bspeed').textContent=world.paused?'||':world.speed+'x'; }
@@ -1772,6 +1864,7 @@ function frame(t){
 
   if(toastT>0){ toastT-=dt; if(toastT<=0) $('toast').style.opacity='0'; }
   updateLabels();
+  if(rosterOpen){ rosterT-=dt; if(rosterT<=0){ rosterT=0.6; updateRoster(); } }
   if(uiTopDirty){ updateTop(); uiTopDirty=false; }
   if(uiNotesDirty){ updateNotes(); uiNotesDirty=false; }
   if(uiInspDirty){ updateInsp(); buildPalette(); uiInspDirty=false; }
@@ -1791,7 +1884,7 @@ requestAnimationFrame(frame);
 function start(w){
   world=w; running=true;
   $('ov').style.display='none';
-  buildPalette(); updateTop(); updateNotes(); updateInsp(); updateMode(); showTray(false);
+  buildPalette(); updateTop(); updateNotes(); updateInsp(); updateMode(); showTray(false); showRoster(false);
   $('buildbtn').onclick=()=>showTray(!trayOpen);
   // frame the shelter
   const c=roomCenter(world.rooms[0]);

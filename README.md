@@ -17,7 +17,8 @@ the tab keeps your shelter.
 The overview is presented as an overseer's terminal: a Vault-Tec HUD with
 segmented power/water/food meters that turn amber and red as stocks run
 short, floating name plates over every room showing its level pips and
-staffing, a build tray along the bottom, and a room inspector on the right.
+staffing, a vault happiness readout, a dweller roster listing everyone and
+their post, a build tray along the bottom, and a room inspector on the right.
 
 Two ways to play it: a three-quarter overview for building and managing, and
 a **first-person mode** — press **Tab** (or *Walk in*) to drop inside the
